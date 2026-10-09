@@ -34,7 +34,6 @@ export function environment() {
   for (const el of document.querySelectorAll('[data-lastpass-root],[data-gr-ext-installed],com-1password-button,grammarly-desktop-integration,[data-bitwarden-watching]')) signs.add(el.tagName.toLowerCase());
   const proto = location.protocol;
   return {
-    online: navigator.onLine,
     local: proto === 'file:',
     origin: proto === 'file:' ? 'Local file' : proto === 'http:' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? 'Local server' : 'A website',
     extensions: [...signs],

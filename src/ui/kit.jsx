@@ -5,14 +5,11 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { go, current } from './router.js';
 import { getState, setState, resetAll } from './store.js';
 import * as I from './icons.jsx';
+import { isOnline, onNetChange } from './net.js';
 
 export function useOnline() {
-  const [on, setOn] = useState(typeof navigator !== 'undefined' ? navigator.onLine : false);
-  useEffect(() => {
-    const f = () => setOn(navigator.onLine);
-    window.addEventListener('online', f); window.addEventListener('offline', f);
-    return () => { window.removeEventListener('online', f); window.removeEventListener('offline', f); };
-  }, []);
+  const [on, setOn] = useState(isOnline);
+  useEffect(() => { setOn(isOnline()); return onNetChange(setOn); }, []);
   return on;
 }
 

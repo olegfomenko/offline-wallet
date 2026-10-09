@@ -3,7 +3,7 @@ import { h, Fragment } from 'preact';
 import { useState, useMemo, useRef } from 'preact/hooks';
 import { go } from '../router.js';
 import { getState, setState, patch, useStore } from '../store.js';
-import { FlowShell, StepRow, Seg, Switch, Spacer, OutField, ExportBtn, PrivChip, InField, I, Card, walletLabel } from '../kit.jsx';
+import { FlowShell, StepRow, Seg, Switch, Spacer, OutField, ExportBtn, PrivChip, InField, I, Card, walletLabel, useOnline } from '../kit.jsx';
 import { environment } from '../env.js';
 import { makeEntropy, countedBits } from '../../core/entropy.js';
 import { mnemonicFromEntropy, walletFromMnemonic, walletFromCustom, seedQREncode, wordlist } from '../../core/wallet.js';
@@ -13,6 +13,7 @@ import { randomInt, wipe } from '../../core/util.js';
 export function Welcome() {
   const st = useStore();
   const env = useMemo(() => environment(), []);
+  const online = useOnline();
   const Row = ({ k, ok, v, last }) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: last ? 'none' : '1px solid var(--line)', fontSize: '15px' }}>
       <span>{k}</span>
@@ -28,7 +29,7 @@ export function Welcome() {
       </div>
       <div class="card">
         <div class="caps" style={{ padding: '12px 16px 4px' }}>Offline check</div>
-        <Row k="Network" ok={!env.online} v={env.online ? 'Online' : 'Offline'} />
+        <Row k="Network" ok={!online} v={online ? 'Online' : 'Offline'} />
         <Row k="Opened from" ok={env.local} v={env.origin} />
         <Row k="Extensions" ok={!env.extensions.length} v={env.extensions.length ? env.extensions.length + ' sign' + (env.extensions.length > 1 ? 's' : '') + ' found' : 'None found'} last />
       </div>
