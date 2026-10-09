@@ -9,7 +9,6 @@
     "build": "node scripts/build.mjs",
     "test": "node --import ./scripts/node-hooks.mjs --test \"test/*.test.js\"",
     "fixtures": "node --import ./scripts/node-hooks.mjs test/make-fixtures.js",
-    "test:browser": "python3 test/browser/e2e.py",
     "vendor": "bash scripts/vendor.sh"
   },
   "devDependencies": {

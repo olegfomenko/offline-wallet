@@ -114,9 +114,10 @@ npm test               # 36 tests on node:test: BIP32/39/44/49/84/86 vectors, SL
                        # real scan), Base43, QR round trips, PSBT sign/finalize for all four script
                        # types, and PSBT attack regressions
 npm run fixtures       # sample PSBTs for the public test seed "abandon … about" in test/data/
-npm run test:browser   # headless Chromium click-through of every flow (needs `pip install playwright`)
-python3 test/browser/cam.py   # webcam scan of an animated UR through Chromium's fake camera
 ```
+
+There are no automated UI tests. Test the UI by hand: open `dist/offline-signer.html` in a browser,
+restore the test seed below, and load the sample PSBTs from `test/data/`.
 
 The tests import the sources directly. Node strips the TypeScript types in the vendored files
 itself, and `scripts/node-hooks.mjs` maps `@noble/…`, `@scure/…` and similar imports to `vendor/`,
@@ -135,7 +136,7 @@ src/ui/     store (in-memory state), router, kit (value-field pattern), sheet (e
             io (QR, webcam, clipboard, files), screens/*
 scripts/    build.mjs, node-hooks.mjs (test import mapping), vendor.sh
 vendor/     pinned third-party sources (VENDORED.md)
-test/       node:test tests, fixtures, browser tests
+test/       node:test tests, fixtures
 ```
 
 ## Known limits
