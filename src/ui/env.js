@@ -32,10 +32,14 @@ export function environment() {
     try { if (g[k]) signs.add('global:' + k); } catch (e) { /* ignore */ }
   }
   for (const el of document.querySelectorAll('[data-lastpass-root],[data-gr-ext-installed],com-1password-button,grammarly-desktop-integration,[data-bitwarden-watching]')) signs.add(el.tagName.toLowerCase());
+  // Phones rarely open a local file as file://: Android Chrome uses content://, and file and
+  // browser apps use their own schemes. Only http(s) from another host is a website.
   const proto = location.protocol;
+  const web = proto === 'http:' || proto === 'https:';
+  const loopback = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
   return {
-    local: proto === 'file:',
-    origin: proto === 'file:' ? 'Local file' : proto === 'http:' && /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ? 'Local server' : 'A website',
+    local: !web,
+    origin: !web ? 'Local file' : loopback ? 'Local server' : 'A website',
     extensions: [...signs],
   };
 }

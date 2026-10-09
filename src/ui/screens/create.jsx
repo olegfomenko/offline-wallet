@@ -3,7 +3,7 @@ import { h, Fragment } from 'preact';
 import { useState, useMemo, useRef } from 'preact/hooks';
 import { go } from '../router.js';
 import { getState, setState, patch, useStore } from '../store.js';
-import { FlowShell, StepRow, Seg, Switch, Spacer, OutField, ExportBtn, PrivChip, InField, I, Card, walletLabel, useOnline } from '../kit.jsx';
+import { FlowShell, StepRow, Seg, Switch, Spacer, OutField, ExportBtn, PrivChip, InField, I, Card, walletLabel, useNet } from '../kit.jsx';
 import { environment } from '../env.js';
 import { makeEntropy, countedBits } from '../../core/entropy.js';
 import { mnemonicFromEntropy, walletFromMnemonic, walletFromCustom, seedQREncode, wordlist } from '../../core/wallet.js';
@@ -13,11 +13,11 @@ import { randomInt, wipe } from '../../core/util.js';
 export function Welcome() {
   const st = useStore();
   const env = useMemo(() => environment(), []);
-  const online = useOnline();
-  const Row = ({ k, ok, v, last }) => (
+  const net = useNet();
+  const Row = ({ k, ok, warn, v, last }) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: last ? 'none' : '1px solid var(--line)', fontSize: '15px' }}>
       <span>{k}</span>
-      <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: ok ? 'var(--accent)' : 'var(--danger)' }}>{ok ? <I.ICheck /> : <I.IWarn size={16} />}{v}</span>
+      <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: ok ? 'var(--accent)' : warn ? 'var(--warn)' : 'var(--danger)' }}>{ok ? <I.ICheck /> : <I.IWarn size={16} />}{v}</span>
     </div>
   );
   return (
@@ -29,11 +29,12 @@ export function Welcome() {
       </div>
       <div class="card">
         <div class="caps" style={{ padding: '12px 16px 4px' }}>Offline check</div>
-        <Row k="Network" ok={!online} v={online ? 'Online' : 'Offline'} />
+        <Row k="Network" ok={net === 'offline'} warn={net === 'unknown'} v={{ offline: 'Offline', online: 'Online', unknown: 'Can’t tell' }[net]} />
         <Row k="Opened from" ok={env.local} v={env.origin} />
         <Row k="Extensions" ok={!env.extensions.length} v={env.extensions.length ? env.extensions.length + ' sign' + (env.extensions.length > 1 ? 's' : '') + ' found' : 'None found'} last />
       </div>
       <span class="note" style={{ marginTop: '-8px' }}>
+        {net === 'unknown' ? 'This browser can’t tell whether the device is online (iPhone and iPad browsers can report a network when there is none). Turn on airplane mode and check that Wi-Fi and Bluetooth are off. ' : ''}
         {env.extensions.length ? 'Something added code or elements to this page (' + env.extensions.slice(0, 3).join(', ') + '). Use a private window with extensions off. ' : ''}
         Nothing is saved: the wallet lives only in this tab and is gone when you close it. To use another seed, open the page in a new tab. This only reads what the browser reports. It can’t prove the computer was never compromised: use a computer that never goes online, ideally booted from a clean live system, and a private window.
       </span>

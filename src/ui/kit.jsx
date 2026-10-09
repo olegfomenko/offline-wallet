@@ -5,19 +5,23 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { go, current } from './router.js';
 import { getState, setState, resetAll } from './store.js';
 import * as I from './icons.jsx';
-import { isOnline, onNetChange } from './net.js';
+import { netStatus, onNetChange } from './net.js';
 
-export function useOnline() {
-  const [on, setOn] = useState(isOnline);
-  useEffect(() => { setOn(isOnline()); return onNetChange(setOn); }, []);
-  return on;
+/** Network status as the browser reports it: 'offline', 'online' or 'unknown' (iPhone and iPad). */
+export function useNet() {
+  const [net, setNet] = useState(netStatus);
+  useEffect(() => { setNet(netStatus()); return onNetChange(setNet); }, []);
+  return net;
 }
 
+export const NET_ONLINE_TIP = 'The browser reports a network connection. Disconnect this device before using real keys.';
+export const NET_UNKNOWN_TIP = 'iPhone and iPad browsers can report a network even when there is none, so the network can’t be checked here. Turn on airplane mode and check that Wi-Fi and Bluetooth are off.';
+
 function NetBadge() {
-  const online = useOnline();
-  return online
-    ? <span class="netbadge online" title="The browser reports a network connection. Disconnect this computer before using real keys."><I.INet />Network detected</span>
-    : <span class="netbadge"><I.INoNet />Offline · no network</span>;
+  const net = useNet();
+  if (net === 'online') return <span class="netbadge online" title={NET_ONLINE_TIP}><I.INet />Network detected</span>;
+  if (net === 'unknown') return <span class="netbadge unknown" title={NET_UNKNOWN_TIP}><I.IWarn size={16} />Can’t check network</span>;
+  return <span class="netbadge"><I.INoNet />Offline · no network</span>;
 }
 
 export function Brand({ sub }) {
@@ -65,7 +69,7 @@ export function NavShell({ max = 1040, gap = 24, children }) {
   const st = getState();
   const w = st.wallet;
   const route = current();
-  const online = useOnline();
+  const net = useNet();
   const [open, setOpen] = useState(false);
   const menuBtn = useRef(null);
   const closeBtn = useRef(null);
@@ -92,8 +96,8 @@ export function NavShell({ max = 1040, gap = 24, children }) {
       <header class="mbar">
         <button ref={menuBtn} class="mbar-btn" aria-label="Menu" aria-controls="ow-nav" aria-expanded={open ? 'true' : 'false'} onClick={() => setOpen(!open)}><I.IMenu /></button>
         <b>Offline Signer</b>
-        {online
-          ? <span class="mbar-net online" title="The browser reports a network connection. Disconnect this computer before using real keys."><I.INet />Network</span>
+        {net === 'online' ? <span class="mbar-net online" title={NET_ONLINE_TIP}><I.INet />Network</span>
+          : net === 'unknown' ? <span class="mbar-net unknown" title={NET_UNKNOWN_TIP}><I.IWarn size={16} />Can’t tell</span>
           : <span class="mbar-net" title="Offline · no network"><I.INoNet />Offline</span>}
       </header>
       {open && <button class="navscrim" aria-label="Close menu" tabindex={-1} onClick={() => close(false)} />}
@@ -111,7 +115,9 @@ export function NavShell({ max = 1040, gap = 24, children }) {
           ))}
         </div>
         <div class="sidefoot">
-          {online ? <span class="offl online"><I.INet />Network detected</span> : <span class="offl"><I.INoNet />Offline · no network</span>}
+          {net === 'online' ? <span class="offl online" title={NET_ONLINE_TIP}><I.INet />Network detected</span>
+            : net === 'unknown' ? <span class="offl unknown" title={NET_UNKNOWN_TIP}><I.IWarn size={16} />Can’t check network</span>
+            : <span class="offl"><I.INoNet />Offline · no network</span>}
           <button class="btn-secondary bold btn-sm" title="Nothing is saved. The wallet is forgotten when you close this tab." onClick={() => { setOpen(false); resetAll(); go('welcome'); }}>Close wallet</button>
         </div>
       </nav>

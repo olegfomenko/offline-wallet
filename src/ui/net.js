@@ -1,19 +1,24 @@
-// Network status, as the browser reports it. Phones often skip the `online`/`offline` events (the tab
-// is suspended while the user switches airplane mode in Control Center or the notification shade),
-// so the status is also re-read when the page comes back into view and every two seconds.
-// This only reads what the browser says; it can't prove there is no network.
+// Network status, as the browser reports it: 'offline', 'online' or 'unknown'.
+//
+// - Phones often skip the `online`/`offline` events (the tab is suspended while airplane mode is
+//   switched), so the status is also re-read when the page comes back into view and every two seconds.
+// - On iPhone and iPad every browser uses WebKit, whose navigator.onLine can stay true with Wi-Fi and
+//   data off, e.g. after reloading the page offline (WebKit bugs 171277, 225645). There it can't be
+//   trusted, so the status is 'unknown' unless the browser says offline.
+// - The page has no network access (CSP), so it can't test the connection itself, and it never tries.
 const subs = new Set();
+const IOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 let cur = read();
 
 function read() {
-  if (typeof navigator === 'undefined') return false;
-  let on = navigator.onLine !== false;
+  if (typeof navigator === 'undefined') return 'unknown';
+  if (navigator.onLine === false) return 'offline';
   try {
     // Chrome on Android: connection.type is 'none' with no network at all.
     const c = navigator.connection;
-    if (c && c.type === 'none') on = false;
+    if (c && c.type === 'none') return 'offline';
   } catch (e) { /* not supported */ }
-  return on;
+  return IOS ? 'unknown' : 'online';
 }
 
 function check() {
@@ -30,8 +35,8 @@ if (typeof window !== 'undefined') {
   setInterval(check, 2000);
 }
 
-/** Whether the browser currently reports a network connection. */
-export function isOnline() { check(); return cur; }
+/** 'offline', 'online' or 'unknown' (the browser can't be trusted to say). */
+export function netStatus() { check(); return cur; }
 
-/** Calls `f(online)` whenever the status changes; returns an unsubscribe function. */
+/** Calls `f(status)` whenever the status changes; returns an unsubscribe function. */
 export function onNetChange(f) { subs.add(f); return () => subs.delete(f); }
