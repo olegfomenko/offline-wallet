@@ -1,5 +1,5 @@
 // Builds dist/offline-signer.html: the app's JS and CSS inlined into one file.
-//   npm install        (once, installs esbuild)
+//   npm ci             (once, installs esbuild)
 //   npm run build
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';

@@ -1,8 +1,9 @@
 # Offline Signer
 
 An offline, single-sig Bitcoin signer that compiles to **one self-contained HTML file**
-(`dist/offline-signer.html`, about 460 KB). Open it from a USB stick on a computer that never goes
-online. It creates or restores a wallet, exports the xpub or descriptor to a watch-only wallet, and
+(`offline-signer.html`, about 460 KB), published at
+<https://olegfomenko.github.io/offline-wallet/>. Download it, then open it from a USB stick on a
+computer that never goes online. It creates or restores a wallet, exports the xpub or descriptor to a watch-only wallet, and
 signs PSBTs that arrive by QR, text or file. Nothing is saved: the wallet lives only in the open tab.
 
 The UI follows the *Offline Bitcoin Wallet · Web* design canvas (Blockstream Blueprint styling) and
@@ -15,8 +16,12 @@ file, and a strict Content-Security-Policy with no network access.
 
 ## Use
 
-1. Check the file: `shasum -a 256 dist/offline-signer.html` must match `dist/SHA256SUMS`.
-2. Copy it to the offline computer. Open it in a private window with extensions off.
+1. Download `offline-signer.html` and `SHA256SUMS` from
+   <https://olegfomenko.github.io/offline-wallet/>, or build it yourself (see Build).
+   `shasum -a 256 offline-signer.html` must match `SHA256SUMS`. Building from source gives the same
+   hash.
+2. Copy it to the offline computer. Open it in a private window with extensions off. Don't use the
+   copy on the website for real keys; its welcome screen flags it as opened from a website.
 3. **Create** (12/24 words, optional dice, coins or drawing) or **Restore** from BIP39 words, custom
    (non-BIP39) words, a master key (xprv/yprv/zprv/tprv or a private descriptor) or single keys
    (WIF, Electrum `p2wpkh:`, hex, BIP38).
@@ -100,8 +105,17 @@ npm ci             # once: installs esbuild exactly as pinned in package-lock.js
 npm run build      # → dist/offline-signer.html and dist/SHA256SUMS
 ```
 
-The build is reproducible: the same sources and esbuild version give a byte-identical file, so
-you can rebuild and compare the hash with `dist/SHA256SUMS`.
+`dist/` is not committed. The build is reproducible: the same sources and esbuild version give a
+byte-identical file, so you can rebuild and compare the hash with the published `SHA256SUMS`.
+
+### CI and GitHub Pages
+
+`.github/workflows/ci.yml` runs on every push and pull request: `npm ci`, `npm test`, `npm run build`,
+then a second build that must match the first byte for byte. It prints the SHA-256 in the log. On
+`master` it publishes `index.html`, `offline-signer.html` and `SHA256SUMS` to GitHub Pages. Every
+action is pinned to a full commit hash.
+
+To turn Pages on once: in the repository's **Settings → Pages**, set **Source** to **GitHub Actions**.
 
 `scripts/build.mjs` bundles `src/main.jsx` with esbuild, inlines the JS and CSS into
 `src/index.html`, and writes the SHA-256. It refuses to build if a network API appears in the bundle.
