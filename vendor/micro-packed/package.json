@@ -1,0 +1,61 @@
+{
+  "name": "micro-packed",
+  "version": "0.11.1",
+  "description": "Define complex binary structures using composable primitives",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "debugger.js",
+    "debugger.d.ts",
+    "src/index.ts",
+    "src/debugger.ts"
+  ],
+  "dependencies": {
+    "@scure/base": "2.4.0"
+  },
+  "devDependencies": {
+    "@paulmillr/jsbt": "0.7.1",
+    "bismar": "0.1.8",
+    "fast-check": "4.2.0",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3"
+  },
+  "scripts": {
+    "benchmark": "node test/benchmark.ts noble",
+    "benchmark:all": "node test/benchmark.ts",
+    "benchmark:size": "bismar -bsm",
+    "build": "tsc",
+    "check": "jsbt-check",
+    "format": "prettier --write src test",
+    "test": "node test/index.ts",
+    "test:slow": "node test/slow.test.ts"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./debugger.js": "./debugger.js"
+  },
+  "engines": {
+    "node": ">= 20.19.0"
+  },
+  "keywords": [
+    "encode",
+    "encoder",
+    "binary",
+    "bytes",
+    "struct",
+    "tuple",
+    "enum"
+  ],
+  "funding": "https://paulmillr.com/funding/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/paulmillr/micro-packed.git"
+  },
+  "type": "module",
+  "main": "index.js",
+  "module": "index.js",
+  "types": "index.d.ts",
+  "sideEffects": false,
+  "author": "Paul Miller (https://paulmillr.com)",
+  "license": "MIT"
+}

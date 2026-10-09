@@ -1,0 +1,31 @@
+{
+  "//": "Only used for module resolution: every third-party import resolves to the vendored, tag-pinned sources in vendor/ (see vendor/VENDORED.md). No npm packages are fetched at build time.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "jsx": "react",
+    "jsxFactory": "h",
+    "jsxFragmentFactory": "Fragment",
+    "baseUrl": ".",
+    "paths": {
+      "@noble/hashes/*": ["vendor/noble-hashes/src/*"],
+      "@noble/curves/*": ["vendor/noble-curves/src/*"],
+      "@noble/ciphers/*": ["vendor/noble-ciphers/src/*"],
+      "@scure/base": ["vendor/scure-base/index.ts"],
+      "@scure/bip32": ["vendor/scure-bip32/index.ts"],
+      "@scure/bip39": ["vendor/scure-bip39/src/index.ts"],
+      "@scure/bip39/wordlists/*": ["vendor/scure-bip39/src/wordlists/*"],
+      "@scure/btc-signer": ["vendor/scure-btc-signer/src/index.ts"],
+      "@scure/btc-signer/*": ["vendor/scure-btc-signer/src/*"],
+      "micro-packed": ["vendor/micro-packed/src/index.ts"],
+      "qr": ["vendor/qr/src/index.ts"],
+      "qr/*": ["vendor/qr/src/*"],
+      "preact": ["vendor/preact/src/index.js"],
+      "preact/hooks": ["vendor/preact/hooks/src/index.js"],
+      "fflate": ["vendor/fflate/src/index.ts"]
+    }
+  }
+}

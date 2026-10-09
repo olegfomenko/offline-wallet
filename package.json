@@ -1,0 +1,22 @@
+{
+  "name": "offline-signer",
+  "version": "0.1.0",
+  "description": "Offline Bitcoin signer that compiles to one self-contained HTML file",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --import ./scripts/node-hooks.mjs --test \"test/*.test.js\"",
+    "fixtures": "node --import ./scripts/node-hooks.mjs test/make-fixtures.js",
+    "test:browser": "python3 test/browser/e2e.py",
+    "vendor": "bash scripts/vendor.sh"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  },
+  "//": "esbuild is the only package npm installs. Runtime code (noble/scure crypto, qr, fflate, preact) is vendored from tagged upstream commits in vendor/; see vendor/VENDORED.md.",
+  "engines": {
+    "node": ">=22.18"
+  }
+}
