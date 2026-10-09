@@ -1,7 +1,7 @@
 // Shared building blocks: page shells, navigation, segmented controls and the value-field pattern
 // (every output has an export button, every input an import button; private values start hidden).
 import { h, Fragment } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { go, current } from './router.js';
 import { getState, setState, resetAll } from './store.js';
 import * as I from './icons.jsx';
@@ -60,27 +60,62 @@ export function walletLabel(w) {
   return { seed: 'Single-sig wallet', custom: 'Single-sig wallet', xkey: 'Master-key wallet', keys: 'Single-key wallet' }[w.kind];
 }
 
-/** Pages of an open wallet: side menu (top menu on narrow screens). */
+const NARROW = '(max-width: 760px)';
+
+/** Pages of an open wallet: side menu on wide screens. On narrow ones a top bar with a menu button
+ *  opens the same menu as a drawer from the left, over a dark backdrop. */
 export function NavShell({ max = 1040, gap = 24, children }) {
   const st = getState();
   const w = st.wallet;
   const route = current();
   const online = useOnline();
+  const [open, setOpen] = useState(false);
+  const menuBtn = useRef(null);
+  const closeBtn = useRef(null);
+  const close = (refocus) => { setOpen(false); if (refocus && menuBtn.current) menuBtn.current.focus(); };
+
+  useEffect(() => {
+    if (!open) return undefined;
+    // While the drawer is open: Escape closes it, the page behind doesn't scroll, and widening the
+    // window past the breakpoint (where the menu is a normal sidebar again) closes it.
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(true); } };
+    const mq = window.matchMedia(NARROW);
+    const onMq = () => { if (!mq.matches) setOpen(false); };
+    const root = document.documentElement;
+    const prev = root.style.overflow;
+    root.style.overflow = 'hidden';
+    document.addEventListener('keydown', onKey);
+    mq.addEventListener('change', onMq);
+    if (closeBtn.current) closeBtn.current.focus();
+    return () => { root.style.overflow = prev; document.removeEventListener('keydown', onKey); mq.removeEventListener('change', onMq); };
+  }, [open]);
+
   return (
     <div class="page nav">
-      <nav aria-label="Wallet" class="side">
-        <Brand sub="Bitcoin · single-sig" />
+      <header class="mbar">
+        <button ref={menuBtn} class="mbar-btn" aria-label="Menu" aria-controls="ow-nav" aria-expanded={open ? 'true' : 'false'} onClick={() => setOpen(!open)}><I.IMenu /></button>
+        <b>Offline Signer</b>
+        {online
+          ? <span class="mbar-net online" title="The browser reports a network connection. Disconnect this computer before using real keys."><I.INet />Network</span>
+          : <span class="mbar-net" title="Offline · no network"><I.INoNet />Offline</span>}
+      </header>
+      {open && <button class="navscrim" aria-label="Close menu" tabindex={-1} onClick={() => close(false)} />}
+      <nav id="ow-nav" aria-label="Wallet" class="side" data-open={open ? 'true' : 'false'}>
+        <div class="sidehead">
+          <Brand sub="Bitcoin · single-sig" />
+          <button ref={closeBtn} class="navclose" aria-label="Close menu" onClick={() => close(true)}><I.IClose size={22} sw={1.8} /></button>
+        </div>
         {w && <div class="walletchip"><span>{walletLabel(w)}</span><b>{w.kind === 'keys' ? w.keys.length + ' key' + (w.keys.length > 1 ? 's' : '') : w.fp}</b></div>}
         <div class="navlist">
           {NAV.map(([id, label, Icon, group]) => (
-            <a href={'#/' + id} class={group.includes(route) ? 'on' : ''} aria-current={group.includes(route) ? 'page' : undefined}>
+            <a href={'#/' + id} class={group.includes(route) ? 'on' : ''} aria-current={group.includes(route) ? 'page' : undefined} onClick={() => setOpen(false)}>
               <span class="ic"><Icon /></span>{label}
             </a>
           ))}
         </div>
         <div class="sidefoot">
           {online ? <span class="offl online"><I.INet />Network detected</span> : <span class="offl"><I.INoNet />Offline · no network</span>}
-          <button class="btn-secondary bold btn-sm" title="Nothing is saved. The wallet is forgotten when you close this tab." onClick={() => { resetAll(); go('welcome'); }}>Close wallet</button>
+          <button class="btn-secondary bold btn-sm" title="Nothing is saved. The wallet is forgotten when you close this tab." onClick={() => { setOpen(false); resetAll(); go('welcome'); }}>Close wallet</button>
         </div>
       </nav>
       <main class="navmain">

@@ -9,6 +9,7 @@ export const IKey = (p) => <S {...p}><circle cx="8" cy="15" r="4" /><path d="M11
 export const INoNet = (p) => <S size={16} {...p}><path d="M2 2l20 20" /><path d="M8.5 16.5a5 5 0 0 1 7 0M5 12.9a10 10 0 0 1 5.2-2.8M14.8 10.1A10 10 0 0 1 19 12.9M12 20h.01" /></S>;
 export const INet = (p) => <S size={16} {...p}><path d="M5 12.6a10 10 0 0 1 14 0M8.5 16.1a5 5 0 0 1 7 0M2 9a15 15 0 0 1 20 0M12 20h.01" /></S>;
 export const IBack = (p) => <S size={22} sw={2} {...p}><path d="M15 6l-6 6 6 6" /></S>;
+export const IMenu = (p) => <S size={22} {...p}><path d="M4 6h16M4 12h16M4 18h16" /></S>;
 export const IClose = (p) => <S size={20} sw={2.2} {...p}><path d="M6 6l12 12M18 6L6 18" /></S>;
 export const IChev = (p) => <S size={16} sw={2} {...p}><path d="M9 6l6 6-6 6" /></S>;
 export const IChevDown = (p) => <S size={16} sw={2} {...p}><path d="M6 9l6 6 6-6" /></S>;
