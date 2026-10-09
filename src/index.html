@@ -12,9 +12,18 @@
 <title>Offline Signer</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23111316'/%3E%3Crect x='3' y='3' width='26' height='26' fill='none' stroke='%2300C3FF' stroke-width='2.5'/%3E%3Cg transform='translate(8 8) scale(0.67)' fill='none' stroke='%2300C3FF' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='8' cy='15' r='4'/%3E%3Cpath d='M11 12l9-9M17 6l3 3M15 8l2 2'/%3E%3C/g%3E%3C/svg%3E">
 <style>/*@@CSS@@*/</style>
+<noscript><style>.noscript{display:flex}#app{display:none}</style></noscript>
 </head>
 <body>
-<div id="app"><noscript><p style="padding:24px;color:#fff;font-family:sans-serif">Offline Signer needs JavaScript. It runs entirely in this file and never connects to the network.</p></noscript></div>
+<!-- Shown only when scripts can't run: JavaScript turned off, or a saved copy the browser shows instead
+     of the page (Chrome on Android does this when a website is reloaded with no connection). A saved copy
+     keeps the rendered screen but none of the code, so #app is hidden: its status and buttons are frozen. -->
+<div id="noscript" class="noscript" role="alert">
+  <h1>The wallet isn't running</h1>
+  <p>Scripts can't run on this page, so nothing here works. If you reloaded the website with no connection, the browser is showing a copy it saved earlier, with scripts turned off.</p>
+  <p>To use the signer offline, download <b>offline-signer.html</b> once and open the file. It runs entirely in that file and never connects to the network.</p>
+</div>
+<div id="app"></div>
 <script id="app-script">/*@@JS@@*/</script>
 </body>
 </html>
