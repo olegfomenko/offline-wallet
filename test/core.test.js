@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import * as btc from '@scure/btc-signer';
 import { HDKey } from '@scure/bip32';
 import { hex, utf8, base64 } from '../src/core/util.js';
-import { descChecksum, parseDescriptor, parseExt, serializeExt, addressOf, decodeAddress } from '../src/core/hd.js';
+import { descChecksum, parseDescriptor, parseExt, serializeExt, addressOf, decodeAddress, withChecksum, TYPES } from '../src/core/hd.js';
 import { walletFromMnemonic, walletFromCustom, readXkey, walletFromXkey, walletFromKeys, accountKeys, account, addressAt, lastWordCandidates, isValidMnemonic, seedQREncode, seedQRDecode, customSeedText } from '../src/core/wallet.js';
-import { decodeWIF, encodeWIF, parseKeyLine, decryptBIP38, pubOf } from '../src/core/keys.js';
+import { decodeWIF, encodeWIF, parseKeyLine, decryptBIP38, pubOf, keyAddress, looksExtended, ELECTRUM_PREFIX } from '../src/core/keys.js';
 import { makeEntropy, countedBits } from '../src/core/entropy.js';
 import { signMessageECDSA, verifyMessageECDSA, signMessageSchnorr, verifyMessageSchnorr } from '../src/core/message.js';
 import { base43, BBQrDecoder, bbqrSplit, classify, MultiPartCollector, psbtQRFrames } from '../src/core/transport.js';
@@ -308,4 +308,71 @@ test('PSBT protections found in review (audit regressions)', () => {
   const before = hex.encode(tx.toPSBT());
   expect(() => signPsbt(tx, analyzePsbt(tx, W), W)).toThrow();
   expect(hex.encode(tx.toPSBT())).toBe(before);
+});
+
+test('every private-key export restores to the same address (restore from a private key)', () => {
+  for (const net of ['main', 'test']) {
+    for (const type of ['wpkh', 'shwpkh', 'pkh', 'tr']) {
+      const A = account(W, type, net, 0);
+      const a0 = addressAt(A, type, net, 0, 0);
+      const priv = a0.node.privateKey;
+      const wif = encodeWIF(priv, net, true);
+      // Single address: Private key screen formats (WIF, Electrum, hex, descriptor).
+      const single = [wif, withChecksum(TYPES[type].tmpl.replace('KEY', wif)), TYPES[type].tmpl.replace('KEY', wif)];
+      if (ELECTRUM_PREFIX[type]) single.push(ELECTRUM_PREFIX[type] + ':' + wif);
+      for (const line of single) {
+        const k = parseKeyLine(line);
+        expect(keyAddress(k, k.type || type, k.net)).toBe(a0.address);
+        if (line !== wif) expect(k.type).toBe(type);
+      }
+      const h = parseKeyLine(hex.encode(priv));
+      expect(h.net).toBe(null); // network is chosen on Check private keys
+      expect(keyAddress(h, type, net)).toBe(a0.address);
+      // Account: xprv/tprv, SLIP-132 and descriptor.
+      const P = accountKeys(W, type, net, 0, null, true);
+      for (const v of [P.x, P.slip, P.desc].filter(Boolean)) {
+        const info = readXkey(v);
+        const t = info.type || type;
+        const wx = walletFromXkey(info, t);
+        const A2 = account(wx, t, info.net, 0);
+        expect(addressAt(A2, t, info.net, 0, 0).address).toBe(a0.address);
+        expect(A2.path).toBe(A.path);
+      }
+    }
+  }
+});
+
+test('descriptors from other wallets (Bitcoin Core) restore', () => {
+  const A = account(W, 'wpkh', 'main', 0);
+  const first = addressAt(A, 'wpkh', 'main', 0, 0);
+  const wif = encodeWIF(first.node.privateKey);
+  // Single key with origin info, and combo() (type chosen by the user, no Taproot).
+  const o = parseKeyLine(withChecksum('wpkh([73c5da0a/84h/0h/0h/0/0]' + wif + ')'));
+  expect(o.type).toBe('wpkh');
+  expect(keyAddress(o, 'wpkh', 'main')).toBe(first.address);
+  expect(parseKeyLine(withChecksum('combo(' + wif + ')')).type).toBe(null);
+  expect(parseKeyLine(withChecksum('combo(' + encodeWIF(first.node.privateKey, 'main', false) + ')')).type).toBe('pkh');
+  // Master key with the account path after it.
+  const root = serializeExt(W.root, 'xprv');
+  for (const d of ['wpkh(' + root + '/84h/0h/0h/<0;1>/*)', 'wpkh([73c5da0a]' + root + "/84'/0'/0'/0/*)"]) {
+    const info = readXkey(withChecksum(d));
+    expect(info.path).toBe("m/84'/0'/0'");
+    expect(info.fp).toBe('73C5DA0A');
+    const wx = walletFromXkey(info, 'wpkh');
+    expect(addressAt(account(wx, 'wpkh', 'main', 0), 'wpkh', 'main', 0, 0).address).toBe(first.address);
+  }
+  expect(() => readXkey(withChecksum('wpkh(' + root + '/84h/0h/0h/0/0)'))).toThrow(/one derived key/);
+});
+
+test('restore input errors are clear', () => {
+  const wif = encodeWIF(new Uint8Array(32).fill(7));
+  expect(() => parseKeyLine('wpkh(' + wif + ')#aaaaaaaa')).toThrow(/checksum/);
+  expect(() => parseKeyLine(withChecksum('wpkh(' + encodeWIF(new Uint8Array(32).fill(7), 'main', false) + ')'))).toThrow(/compressed/);
+  expect(() => parseKeyLine(withChecksum('wpkh(' + wif + '/0)'))).toThrow(/derivation path/);
+  const root = serializeExt(W.root, 'xprv');
+  expect(looksExtended(root)).toBe(true);
+  expect(looksExtended(withChecksum('wpkh([73c5da0a/84h/0h/0h]' + root + '/<0;1>/*)'))).toBe(true);
+  expect(looksExtended(wif)).toBe(false);
+  expect(() => parseKeyLine(root)).toThrow(/Master key/);
+  expect(() => readXkey(withChecksum('combo(' + root + ')'))).toThrow(/single keys/);
 });

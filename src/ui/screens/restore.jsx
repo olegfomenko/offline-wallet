@@ -5,7 +5,7 @@ import { go } from '../router.js';
 import { getState, setState, patch, useStore } from '../store.js';
 import { FlowShell, TitleRow, StepRow, Seg, Spacer, OutField, ExportBtn, PrivChip, InField, HiddenInField, ImportBtn, I, Card } from '../kit.jsx';
 import { WORDSET, normalizeWords, isValidMnemonic, walletFromCustom, readXkey, walletFromXkey, walletFromKeys, account, addressAt, seedQRDecode, compactSeedQRDecode, customSeedText } from '../../core/wallet.js';
-import { parseKeyLine, decryptBIP38, keyAddress, encodeWIF, pubOf, ELECTRUM_PREFIX } from '../../core/keys.js';
+import { parseKeyLine, looksExtended, decryptBIP38, keyAddress, encodeWIF, pubOf, ELECTRUM_PREFIX } from '../../core/keys.js';
 import { TYPES } from '../../core/hd.js';
 import { hex } from '../../core/util.js';
 
@@ -176,23 +176,31 @@ export function RestoreKey() {
   const master = kind === 'master';
   const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const A = master
-    ? [['xprv / tprv', 'No address type inside. You pick it next.'], ['yprv · zprv', 'Nested or Native SegWit, read from the prefix.'], ['Descriptor', 'wpkh([fp/path]xprv…) — type, fingerprint and path included.']]
-    : [['WIF', 'K…, L… or 5…. Address type is chosen next.'], ['p2wpkh:WIF', 'Electrum format with the type in front.'], ['Hex', '64 hex characters, no checksum.'], ['6P… (BIP38)', 'Password-protected key. Asks for the password.']];
+    ? [['xprv / tprv', 'No address type inside. You pick it next.'], ['yprv · zprv', 'Nested or Native SegWit, read from the prefix.'], ['Descriptor', 'wpkh([fp/path]xprv…/<0;1>/*) or wpkh(xprv…/84h/0h/0h/<0;1>/*) — type, fingerprint and path included.']]
+    : [['WIF', 'K…, L… or 5…. Address type is chosen next.'], ['p2wpkh:WIF', 'Electrum format with the type in front.'], ['Descriptor', 'wpkh(K…)#…, sh(wpkh()), pkh(), tr() — type included. combo() asks.'], ['Hex', '64 hex characters, no checksum. Network is chosen next.'], ['6P… (BIP38)', 'Password-protected key. Asks for the password.']];
+  // Whatever tab it was entered on, an extended key goes to Check master key and single keys go to
+  // Check private keys.
+  const toMaster = (text) => {
+    const info = readXkey(text);
+    patch('flow', { origin: 'restore', xkey: info, keyKind: 'master' });
+    setRaw('');
+    go('check-master');
+  };
+  const toSingle = (ls) => {
+    const keys = ls.map((l, i) => { try { return parseKeyLine(l); } catch (e) { throw new Error((ls.length > 1 ? 'Line ' + (i + 1) + ': ' : '') + e.message); } });
+    if (!keys.length) throw new Error('Enter at least one key.');
+    patch('flow', { origin: 'restore', keys, keyKind: 'single' });
+    setRaw('');
+    go('check-keys');
+  };
   const check = () => {
     setErr('');
     try {
-      if (master) {
-        const info = readXkey(lines.join(''));
-        patch('flow', { origin: 'restore', xkey: info, keyKind: 'master' });
-        setRaw('');
-        go('check-master');
-      } else {
-        const keys = lines.map((l, i) => { try { return parseKeyLine(l); } catch (e) { throw new Error('Line ' + (i + 1) + ': ' + e.message); } });
-        if (!keys.length) throw new Error('Enter at least one key.');
-        patch('flow', { origin: 'restore', keys, keyKind: 'single' });
-        setRaw('');
-        go('check-keys');
-      }
+      const joined = lines.join('');
+      if (looksExtended(joined) && (master || lines.length === 1)) toMaster(joined);
+      else if (master && !looksExtended(joined) && lines.every((l) => { try { return !!parseKeyLine(l); } catch (e) { return false; } })) toSingle(lines);
+      else if (master) toMaster(joined);
+      else toSingle(lines);
     } catch (e) { setErr(e.message); }
   };
   return (
@@ -279,6 +287,7 @@ export function CheckSingleKeys() {
   if (!flow.keys) { go('restore-key'); return null; }
   const up = (i, p) => setKeys((ks) => ks.map((k, j) => (j === i ? { ...k, ...p } : k)));
   const ready = keys.filter((k) => k.priv);
+  const mixedNets = new Set(ready.map((k) => (k.net === 'test' ? 'test' : 'main'))).size > 1;
   const decrypt = async (i) => {
     up(i, { busy: true, err: '', prog: 0 });
     try {
@@ -286,13 +295,15 @@ export function CheckSingleKeys() {
       up(i, { priv: r.priv, compressed: r.compressed, net: 'main', busy: false, pw: '', pick: r.compressed ? 'wpkh' : 'pkh' });
     } catch (e) { up(i, { busy: false, err: e.message }); }
   };
-  const kindName = (k) => ({ wif: 'WIF, ' + (k.compressed ? 'compressed' : 'uncompressed'), electrum: 'Electrum format', hex: 'Hex, no checksum', bip38: 'BIP38, password-protected' }[k.kind]);
+  const kindName = (k) => ({ wif: 'WIF, ' + (k.compressed ? 'compressed' : 'uncompressed'), electrum: 'Electrum format', descriptor: 'Descriptor', hex: 'Hex, no checksum', bip38: 'BIP38, password-protected' }[k.kind]);
+  const typeSource = (k) => (k.kind === 'descriptor' ? 'taken from the descriptor.' : 'taken from the ' + (ELECTRUM_PREFIX[k.type] || 'p2tr') + ': prefix.');
   return (
     <FlowShell max={680} gap={16}>
       <TitleRow back="restore-key" title="Check private keys" />
       {keys.map((k, i) => {
         const net = k.net === 'test' ? 'test' : 'main';
-        const types = k.priv ? (k.compressed ? ['wpkh', 'shwpkh', 'pkh', 'tr'] : ['pkh']) : [];
+        // combo() covers Legacy, Nested and Native SegWit, not Taproot.
+        const types = k.priv ? (!k.compressed ? ['pkh'] : k.kind === 'descriptor' ? ['wpkh', 'shwpkh', 'pkh'] : ['wpkh', 'shwpkh', 'pkh', 'tr']) : [];
         return (
           <div class="stack14" style={{ padding: '14px', border: '1px solid var(--line)' }}>
             <span style={{ fontWeight: 600 }}>Key {i + 1} · {kindName(k)}</span>
@@ -304,8 +315,14 @@ export function CheckSingleKeys() {
                 <button class="btn-secondary btn-sm" disabled={k.busy || !k.pw} onClick={() => decrypt(i)}>{k.busy ? 'Decrypting…' : 'Decrypt'}</button>
               </>
             )}
+            {k.kind === 'hex' && (
+              <div class="stack" style={{ gap: '8px' }}>
+                <span class="small"><b style={{ color: 'var(--text)' }}>Network.</b> A hex key doesn’t say which network it’s for.</span>
+                <Seg items={[['main', 'Mainnet'], ['test', 'Testnet · Signet']]} value={net} onChange={(v) => up(i, { net: v })} />
+              </div>
+            )}
             {k.priv && k.type && (
-              <OutField label="Address" value={keyAddress(k, k.type, net)} spec={{ title: TYPES[k.type].label + ' address', value: keyAddress(k, k.type, net), file: 'address-key-' + (i + 1) + '.txt' }} note={TYPES[k.type].label + ', taken from the ' + ELECTRUM_PREFIX[k.type] + ': prefix.'} />
+              <OutField label="Address" value={keyAddress(k, k.type, net)} spec={{ title: TYPES[k.type].label + ' address', value: keyAddress(k, k.type, net), file: 'address-key-' + (i + 1) + '.txt' }} note={TYPES[k.type].label + ', ' + typeSource(k)} />
             )}
             {k.priv && !k.type && (
               <div class="stack" style={{ gap: '8px' }}>
@@ -329,11 +346,12 @@ export function CheckSingleKeys() {
         );
       })}
       <div class="infoline"><I.IInfo /><span>A wallet of single keys has no new addresses, and change goes back to one of these, which hurts privacy. Best use: move the coins to a seed-based wallet. Your online wallet builds that transaction, this device signs it.</span></div>
-      {ready.length ? <button class="btn-primary" onClick={() => {
+      {mixedNets && <span class="note err">These keys are for different networks. A wallet of single keys uses one network: restore them separately.</span>}
+      {ready.length && !mixedNets ? <button class="btn-primary" onClick={() => {
         const wk = walletFromKeys(ready.map((k, i) => ({ priv: k.priv, compressed: k.compressed, type: k.type || k.pick, net: k.net || 'main', label: 'Key ' + (keys.indexOf(k) + 1) })));
         setState({ wallet: wk, flow: { origin: 'restore', done: true }, settings: { ...settings, net: wk.net } });
         go('wallet-ready');
-      }}>Create wallet from {ready.length} key{ready.length > 1 ? 's' : ''}</button> : <button class="btn-primary" disabled>Decrypt a key first</button>}
+      }}>Create wallet from {ready.length} key{ready.length > 1 ? 's' : ''}</button> : <button class="btn-primary" disabled>{mixedNets ? 'Keys from different networks' : 'Decrypt a key first'}</button>}
     </FlowShell>
   );
 }

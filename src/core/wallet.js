@@ -57,13 +57,25 @@ export function walletFromCustom(text, passphrase = '') {
 export function readXkey(input) {
   const s = String(input).trim();
   let desc = null, keyStr = s;
-  if (/^(wpkh|sh|pkh|tr)\(/.test(s)) { desc = parseDescriptor(s); keyStr = desc.key; }
-  const ext = parseExt(keyStr);
+  if (/^(wpkh|sh|pkh|tr|combo)\(/.test(s)) { desc = parseDescriptor(s); keyStr = desc.key; }
+  let ext = parseExt(keyStr);
   if (!ext.priv) throw new Error('This is a public key (watch-only). Enter the private key to sign.');
+  if (desc && desc.type === null) throw new Error('combo() is read only for single keys, not extended keys.');
   const type = desc ? desc.type : ext.type;
   if (desc && desc.path) {
     const depth = parsePath(desc.path).length;
     if (depth !== ext.depth) throw new Error('The descriptor path depth does not match the key depth.');
+  }
+  let fp = desc && desc.fp ? desc.fp : ext.depth === 0 ? fpHex(ext.node.fingerprint).toUpperCase() : null;
+  let path = desc && desc.path ? normPath(desc.path) : ext.depth === 0 ? 'm' : null;
+  if (desc && desc.deriv) {
+    // A path after the key, e.g. Bitcoin Core's wpkh(xprv/84h/0h/0h/<0;1>/*): the account is that child.
+    if (!desc.suffix) throw new Error('This descriptor is for one derived key, not an account. It needs to end in /<0;1>/* (or /0/*, /1/*).');
+    let node = ext.node;
+    for (const i of parsePath('m' + desc.deriv)) node = node.deriveChild(i);
+    ext = { ...ext, node, depth: node.depth, parentFp: node.parentFingerprint, index: node.index };
+    path = path ? normPath(path + desc.deriv) : null;
+    if (!path) fp = null;
   }
   const format = desc ? 'Private descriptor' : ext.type ? ext.name + ' · SLIP-132' : ext.name + ' · plain BIP32';
   return {
@@ -71,8 +83,7 @@ export function readXkey(input) {
     depth: ext.depth,
     level: ext.depth === 0 ? 'depth 0 · master key' : ext.depth === 3 ? 'depth 3 · account key' : 'depth ' + ext.depth,
     parentFp: fpHex(ext.parentFp).toUpperCase(),
-    fp: desc && desc.fp ? desc.fp : ext.depth === 0 ? fpHex(ext.node.fingerprint).toUpperCase() : null,
-    path: desc && desc.path ? normPath(desc.path) : ext.depth === 0 ? 'm' : null,
+    fp, path,
     net: ext.net,
   };
 }

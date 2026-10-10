@@ -1,8 +1,8 @@
-// Single private keys: WIF, Electrum "type:WIF", raw hex and BIP38 (password-protected).
+// Single private keys: WIF, Electrum "type:WIF", single-key descriptors, raw hex and BIP38 (password-protected).
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { scryptAsync } from '@noble/hashes/scrypt.js';
 import { ecb } from '@noble/ciphers/aes.js';
-import { base58check, NETS, addressOf } from './hd.js';
+import { base58check, NETS, addressOf, parseDescriptor } from './hd.js';
 import { concat, equal, sha256d, hex, isHex, utf8 } from './util.js';
 
 const N = secp256k1.Point.CURVE().n;
@@ -41,9 +41,14 @@ export function decodeWIF(s) {
 const ELECTRUM = { p2pkh: 'pkh', 'p2wpkh-p2sh': 'shwpkh', p2wpkh: 'wpkh', p2tr: 'tr' };
 export const ELECTRUM_PREFIX = { pkh: 'p2pkh', shwpkh: 'p2wpkh-p2sh', wpkh: 'p2wpkh' };
 
+/** True if the text looks like an extended key or a descriptor holding one (for the Master key tab). */
+export function looksExtended(s) {
+  return /(^|[(\]])[xyzuvt]prv[1-9A-HJ-NP-Za-km-z]{100,}/.test(String(s).trim());
+}
+
 /**
- * Read one key line. Returns { kind: 'wif'|'electrum'|'hex'|'bip38', priv?, compressed, net, type?, encrypted? }
- * BIP38 keys come back with `encrypted` set and need decryptBIP38().
+ * Read one key line. Returns { kind: 'wif'|'electrum'|'descriptor'|'hex'|'bip38', priv?, compressed, net, type?, encrypted? }
+ * `type` is set when the line says it (Electrum prefix or descriptor); otherwise the user picks it.
  */
 export function parseKeyLine(line) {
   const s = String(line).trim();
@@ -51,8 +56,19 @@ export function parseKeyLine(line) {
   const m = /^(p2pkh|p2wpkh-p2sh|p2wpkh|p2tr):(.+)$/.exec(s);
   if (m) {
     const k = decodeWIF(m[2].trim());
-    if (!k.compressed && m[1] !== 'p2pkh') throw new Error('SegWit needs a compressed key.');
+    if (!k.compressed && m[1] !== 'p2pkh') throw new Error('SegWit and Taproot need a compressed key.');
     return { kind: 'electrum', ...k, type: ELECTRUM[m[1]], source: s };
+  }
+  if (/^(wpkh|sh|pkh|tr|combo)\(/.test(s)) {
+    if (looksExtended(s)) throw new Error('This descriptor holds an extended key. Use Master key.');
+    const d = parseDescriptor(s);
+    if (d.deriv || d.suffix) throw new Error('A single key can’t have a derivation path after it.');
+    let k;
+    try { k = decodeWIF(d.key); } catch (e) { throw new Error('The key inside the descriptor isn’t a WIF private key.'); }
+    if (!k.compressed && d.type && d.type !== 'pkh') throw new Error('SegWit and Taproot need a compressed key.');
+    // combo() of an uncompressed key is only Legacy.
+    const type = d.type || (k.compressed ? null : 'pkh');
+    return { kind: 'descriptor', ...k, type, source: s, originFp: d.fp, originPath: d.path };
   }
   if (/^6P[1-9A-HJ-NP-Za-km-z]{56}$/.test(s)) return { kind: 'bip38', encrypted: s, source: s };
   if (/^[0-9a-fA-F]{64}$/.test(s)) {
@@ -61,7 +77,8 @@ export function parseKeyLine(line) {
     return { kind: 'hex', priv, compressed: true, net: null, source: s };
   }
   if (/^[5KLc9][1-9A-HJ-NP-Za-km-z]{50,51}$/.test(s)) return { kind: 'wif', ...decodeWIF(s), source: s };
-  throw new Error('Not a private key this app reads (WIF, type:WIF, 64 hex, or 6P… BIP38).');
+  if (looksExtended(s)) throw new Error('This is an extended key. Use Master key.');
+  throw new Error('Not a private key this app reads (WIF, type:WIF, a descriptor, 64 hex, or 6P… BIP38).');
 }
 
 // ---- BIP38 ----

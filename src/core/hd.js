@@ -193,16 +193,22 @@ export function parseDescriptor(text) {
   if (m[2] && descChecksum(body) !== m[2]) throw new Error('The descriptor checksum does not match. Check for typos.');
   const forms = [
     [/^wpkh\((.*)\)$/, 'wpkh'], [/^sh\(wpkh\((.*)\)\)$/, 'shwpkh'], [/^pkh\((.*)\)$/, 'pkh'], [/^tr\(([^,()]*)\)$/, 'tr'],
+    [/^combo\((.*)\)$/, null], // Bitcoin Core: the same key as Legacy, Nested and Native SegWit
   ];
   for (const [re, type] of forms) {
     const x = re.exec(body);
     if (!x) continue;
     const km = /^(?:\[([0-9a-fA-F]{8})((?:\/\d+['hH]?)*)\])?([1-9A-HJ-NP-Za-km-z]+)((?:\/(?:\d+['hH]?|<\d+;\d+>|\*))*)$/.exec(x[1]);
     if (!km) throw new Error('Could not read the key inside the descriptor.');
-    if (!['', '/<0;1>/*', '/0/*', '/1/*'].includes((km[4] || '').replace(/[hH]/g, "'"))) throw new Error('Only account descriptors ending in /<0;1>/* (or /0/*, /1/*) are supported.');
-    return { type, fp: km[1] ? km[1].toUpperCase() : null, path: km[1] ? 'm' + (km[2] || '').replace(/[hH]/g, "'") : null, key: km[3], suffix: km[4] || '', checksum: m[2] || null };
+    // After the key: an optional derivation path (Bitcoin Core writes a master key as
+    // xprv/84h/0h/0h/<0;1>/*), then the receive/change ending.
+    const after = (km[4] || '').replace(/[hH]/g, "'");
+    const ending = ['/<0;1>/*', '/0/*', '/1/*'].find((e) => after.endsWith(e)) || '';
+    const deriv = after.slice(0, after.length - ending.length);
+    if (/[<*]/.test(deriv)) throw new Error('Only account descriptors ending in /<0;1>/* (or /0/*, /1/*) are supported.');
+    return { type, fp: km[1] ? km[1].toUpperCase() : null, path: km[1] ? 'm' + (km[2] || '').replace(/[hH]/g, "'") : null, key: km[3], deriv, suffix: ending, checksum: m[2] || null };
   }
-  throw new Error('Only single-key descriptors are supported: wpkh(), sh(wpkh()), pkh(), tr().');
+  throw new Error('Only single-key descriptors are supported: wpkh(), sh(wpkh()), pkh(), tr(), combo().');
 }
 
 export { HDKey, HARDENED_OFFSET, fpHex, hash160 };

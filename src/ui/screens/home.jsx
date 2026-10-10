@@ -100,11 +100,6 @@ export function Settings() {
         <span class="note">{fmtAmt(1500000n, un)} · same amount, shown everywhere amounts appear</span>
       </div>
       <div class="stack" style={{ gap: '8px' }}>
-        <span class="caps s12">Network</span>
-        <Seg items={[['main', 'Mainnet'], ['test', 'Testnet'], ['signet', 'Signet'], ['regtest', 'Regtest']]} value={settings.net} onChange={(v) => set({ net: v })} />
-        <span class="note">{settings.net === 'main' ? 'Real bitcoin. Test networks change addresses and key prefixes, and use coin type 1′ in standard paths.' : 'Test coins have no value. Addresses start with ' + (settings.net === 'regtest' ? 'bcrt1' : 'tb1') + ', keys with tpub/vpub.'}</span>
-      </div>
-      <div class="stack" style={{ gap: '8px' }}>
         <span class="caps s12">Fee warning</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div class="stepper" style={{ width: '160px' }}>
@@ -263,7 +258,7 @@ export function CheckAddress() {
       )}
       {prog !== null && <div class="stack"><span class="note"><span class="spin" /> Searching… {Math.round(prog * 100)}%</span><div class="progressbar"><i style={{ width: Math.round(prog * 100) + '%' }} /></div></div>}
       {X && <div class="resultbox" style={{ borderColor: X.b }}><b style={{ color: X.c }}>{X.t}</b><span class="small">{X.body}</span></div>}
-      <span class="note">Network: {NETS[net].name}. Change it in Settings.</span>
+      <span class="note">Network: {NETS[net].name}. Change it on the <a href="#/addresses">Addresses</a> screen.</span>
     </NavShell>
   );
 }
