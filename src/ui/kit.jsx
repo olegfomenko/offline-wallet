@@ -6,6 +6,7 @@ import { go, current } from './router.js';
 import { getState, setState, resetAll } from './store.js';
 import * as I from './icons.jsx';
 import { netStatus, onNetChange } from './net.js';
+import { KbdButton } from './Keyboard.jsx';
 
 /** Network status as the browser reports it: 'offline', 'online' or 'unknown' (iPhone and iPad). */
 export function useNet() {
@@ -205,29 +206,35 @@ export function OutField({ label, value, spec, note, noteCls = '', priv, childre
 }
 
 /** Input field with an import button. */
-export function InField({ label, priv, value, onInput, placeholder, note, noteCls = '', textarea, password, bad, spec, mono = true, rows, id, right }) {
+/**
+ * `kb`: { open: () => void, what, isOpen } adds the on-screen keyboard button (and the sheet option).
+ * Single-line fields put it before the import button; a text area stacks import above it.
+ */
+export function InField({ label, priv, value, onInput, placeholder, note, noteCls = '', textarea, password, bad, spec, mono = true, rows, id, right, kb }) {
   const cls = (textarea ? 'textarea' : 'input') + (bad ? ' bad' : '') + (mono ? '' : ' sans');
   const common = { id, value, placeholder, spellcheck: false, autocapitalize: 'none', autocomplete: 'off', 'aria-label': label, onInput: (e) => onInput(e.currentTarget.value) };
+  const imp = <ImportBtn spec={{ title: label, priv, ...spec, kb: kb ? kb.open : undefined, onValue: spec && spec.onValue ? spec.onValue : (v) => onInput(typeof v === 'string' ? v : new TextDecoder().decode(v)), focusId: id }} />;
+  const key = kb && <KbdButton what={kb.what} open={kb.isOpen} onClick={kb.open} />;
   return (
     <div class="field">
       <div class="fhead"><span class="flabel">{label}{priv && <PrivChip />}</span><span>{right}</span></div>
       <div class="fbody">
         {textarea ? <textarea class={cls} rows={rows} {...common} /> : <input class={cls} type={password ? 'password' : 'text'} {...common} />}
-        <ImportBtn spec={{ title: label, priv, ...spec, onValue: spec && spec.onValue ? spec.onValue : (v) => onInput(typeof v === 'string' ? v : new TextDecoder().decode(v)), focusId: id }} />
+        {kb ? (textarea ? <div class="fbtns col">{imp}{key}</div> : <>{key}{imp}</>) : imp}
       </div>
       {note && <span class={'note ' + noteCls}>{note}</span>}
     </div>
   );
 }
 
-/** Private input that stays masked; content arrives through the import sheet. */
-export function HiddenInField({ label, has, count, onValue, note, multi, onType }) {
+export function HiddenInField({ label, has, count, onValue, note, multi, onType, kb, id }) {
   return (
     <div class="field">
       <div class="fhead"><span class="flabel">{label}<PrivChip /></span><span /></div>
       <div class="fbody">
-        <div class="valbox hiddenv" role="textbox" aria-label={label + ', hidden'}><span style={{ color: has ? 'var(--dim)' : 'var(--line2)' }}>{has ? '••••••••••••' : '············'}</span><small>{has ? 'Hidden · ' + count : 'Nothing entered'}</small></div>
-        <ImportBtn spec={{ title: label, priv: true, onValue, multi, onType }} />
+        <div id={id} class="valbox hiddenv" role="textbox" aria-label={label + ', hidden'}><span style={{ color: has ? 'var(--dim)' : 'var(--line2)' }}>{has ? '••••••••••••' : '············'}</span><small>{has ? 'Hidden · ' + count : 'Nothing entered'}</small></div>
+        {kb && <KbdButton what={kb.what} open={kb.isOpen} onClick={kb.open} />}
+        <ImportBtn spec={{ title: label, priv: true, onValue, multi, onType, kb: kb ? kb.open : undefined }} />
       </div>
       {note && <span class="note">{note}</span>}
     </div>

@@ -6,6 +6,8 @@ import { getState, setState, patch, useStore } from '../store.js';
 import { NavShell, TitleRow, Seg, Spacer, OutField, ExportBtn, PrivChip, InField, I, Card, walletLabel, fmtAmt } from '../kit.jsx';
 import { SeedGrid, seedExportSpec } from './create.jsx';
 import { SeedCells, seedStats, wordsFromInput } from './restore.jsx';
+import { Keyboard, KbdButton, useKbd } from '../Keyboard.jsx';
+import { firstEmpty } from '../kbd.js';
 import { wordlist, lastWordCandidates, WORDSET } from '../../core/wallet.js';
 import { encodeWIF } from '../../core/keys.js';
 import { NETS, TYPES } from '../../core/hd.js';
@@ -170,7 +172,10 @@ export function LastWord() {
   const [len, setLen] = useState(24);
   const [words, setWords] = useState([]);
   const [pick, setPick] = useState(0);
+  const kb = useKbd();
   const n = len - 1;
+  const setW = (w) => { setWords(w); setPick(0); };
+  const openKb = () => kb.open('seed', firstEmpty(words, n));
   const G = seedStats(words, n);
   const cands = useMemo(() => (G.complete ? lastWordCandidates(words.slice(0, n).map((x) => x.trim().toLowerCase())) : []), [G.complete, words.join(' '), n]);
   const chosen = cands[pick] ? cands[pick].word : '';
@@ -188,9 +193,12 @@ export function LastWord() {
       <div class="field" style={{ gap: '8px' }}>
         <div class="fhead">
           <span class="flabel">Your first {n} words<PrivChip /></span>
-          <button class="iconbtn priv" aria-label="Enter seed words: type, paste, scan or load" title="Enter seed words: type, paste, scan or load" onClick={() => setState({ sheet: { mode: 'import', title: 'Seed words', priv: true, focusId: 'lw0', onValue: (v) => { const w = wordsFromInput(v); if (w.length !== 11 && w.length !== 23) return { error: 'Read ' + w.length + ' words. Expected 11 or 23.' }; setLen(w.length + 1); setWords(w); setPick(0); } } })}><I.IImport /></button>
+          <span class="fbtns">
+            <KbdButton what="seed words" open={kb.id === 'seed'} onClick={openKb} />
+            <button class="iconbtn priv" aria-label="Enter seed words: type, paste, scan or load" title="Enter seed words: type, paste, scan or load" onClick={() => setState({ sheet: { mode: 'import', title: 'Seed words', priv: true, focusId: 'lw0', kb: openKb, onValue: (v) => { const w = wordsFromInput(v); if (w.length !== 11 && w.length !== 23) return { error: 'Read ' + w.length + ' words. Expected 11 or 23.' }; setLen(w.length + 1); setWords(w); setPick(0); } } })}><I.IImport /></button>
+          </span>
         </div>
-        <SeedCells words={words} len={n} onChange={(w) => { setWords(w); setPick(0); }} prefix="lw" />
+        <SeedCells words={words} len={n} onChange={setW} prefix="lw" active={kb.id === 'seed' ? kb.i : -1} onPick={(i) => { if (kb.id === 'seed') kb.setI(i); }} />
         <span class={'note' + (G.bad ? ' err' : '')}>{note}</span>
       </div>
       {G.complete && (
@@ -206,6 +214,7 @@ export function LastWord() {
           {st.wallet && <span class="note">This starts a new wallet. When you finish, it replaces the one open in this tab.</span>}
         </div>
       ) : <button class="btn-primary" disabled>{G.bad ? 'Fix the marked words' : 'Enter ' + n + ' words first'}</button>}
+      <Keyboard kb={kb} targets={{ seed: { label: 'Your first ' + n + ' words', layout: 'seed', len: n, value: words, onChange: setW, anchor: (i) => 'lw' + i } }} />
     </NavShell>
   );
 }

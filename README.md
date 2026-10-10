@@ -34,6 +34,12 @@ Every value works the same way. Outputs have an export button (QR · Copy · Dow
 file). Inputs have an import button (Type · Paste · Scan QR · QR image · File). Private values stay
 hidden until you reveal them.
 
+Private fields (seed words, custom words, passphrase, private keys, BIP38 password) also have an
+**on-screen keyboard**: click the keys instead of typing, so a keylogger on the computer records
+nothing. Seed words get BIP39 suggestions and dimmed letters that no word continues with. **Shuffle
+keys** mixes the key positions (from `crypto.getRandomValues`, new on every open). Hidden values show
+as dots in the preview until you press Show. The physical keyboard keeps working alongside it.
+
 ## What a PSBT review checks
 
 - **Input ownership.** The key is re-derived from the wallet and compared with the PSBT's pubkey and
@@ -123,10 +129,11 @@ To turn Pages on once: in the repository's **Settings → Pages**, set **Source*
 ## Test
 
 ```sh
-npm test               # 36 tests on node:test: BIP32/39/44/49/84/86 vectors, SLIP-132, BIP380, WIF,
+npm test               # 47 tests on node:test: BIP32/39/44/49/84/86 vectors, SLIP-132, BIP380, WIF,
                        # BIP38, BIP-137/340 messages, UR (bc-ur reference vectors), BBQr (Coinkite's
                        # real scan), Base43, QR round trips, PSBT sign/finalize for all four script
-                       # types, and PSBT attack regressions
+                       # types, PSBT attack regressions, private-key restore round trips, and the
+                       # on-screen keyboard logic (layouts, BIP39 letters and suggestions, shuffle)
 npm run fixtures       # sample PSBTs for the public test seed "abandon … about" in test/data/
 ```
 
@@ -147,7 +154,7 @@ Never send funds to that seed.
 src/core/   wallet, hd (paths, SLIP-132, descriptors), keys (WIF, BIP38), entropy, message,
             psbt (review and signing), transport (formats, BBQr, Base43, pMofN), ur, search
 src/ui/     store (in-memory state), router, kit (value-field pattern), sheet (export/import),
-            io (QR, webcam, clipboard, files), screens/*
+            io (QR, webcam, clipboard, files), kbd + Keyboard (on-screen keyboard), screens/*
 scripts/    build.mjs, node-hooks.mjs (test import mapping), vendor.sh
 vendor/     pinned third-party sources (VENDORED.md)
 test/       node:test tests, fixtures

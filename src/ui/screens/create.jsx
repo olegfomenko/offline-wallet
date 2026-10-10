@@ -5,6 +5,7 @@ import { go } from '../router.js';
 import { getState, setState, patch, useStore } from '../store.js';
 import { FlowShell, StepRow, Seg, Switch, Spacer, OutField, ExportBtn, PrivChip, InField, I, Card, walletLabel, useNet } from '../kit.jsx';
 import { environment } from '../env.js';
+import { Keyboard, useKbd } from '../Keyboard.jsx';
 import { makeEntropy, countedBits } from '../../core/entropy.js';
 import { mnemonicFromEntropy, walletFromMnemonic, walletFromCustom, seedQREncode, wordlist } from '../../core/wallet.js';
 import { randomInt, wipe } from '../../core/util.js';
@@ -326,6 +327,7 @@ export function Passphrase() {
   const [p1, setP1] = useState('');
   const [p2, setP2] = useState('');
   const [err, setErr] = useState('');
+  const kb = useKbd();
   const restore = flow.origin === 'restore';
   if (!flow.words && !flow.custom) { go('welcome'); return null; }
   const match = p1 === p2;
@@ -351,8 +353,10 @@ export function Passphrase() {
       <Switch on={on} onClick={() => setOn(!on)} label="Use a passphrase" />
       {on && (
         <div class="stack14">
-          <InField id="pp1" label="Passphrase" priv password mono={false} value={p1} onInput={setP1} placeholder="Enter passphrase" />
+          <InField id="pp1" label="Passphrase" priv password mono={false} value={p1} onInput={setP1} placeholder="Enter passphrase"
+            kb={{ what: 'the passphrase', isOpen: kb.id === 'p1', open: () => kb.open('p1') }} />
           <InField id="pp2" label="Repeat passphrase" priv password mono={false} value={p2} onInput={setP2} placeholder="Enter it again"
+            kb={{ what: 'the repeated passphrase', isOpen: kb.id === 'p2', open: () => kb.open('p2') }}
             note={p2 ? (match ? 'Both entries match.' : 'The two entries don’t match.') : 'Capital letters, spaces and accents all count.'} noteCls={p2 && !match ? 'err' : ''} />
           <div class="warnline"><I.IWarn /><span>It is not part of your seed backup. If you lose it, the funds are gone. Write it down separately.</span></div>
         </div>
@@ -361,6 +365,10 @@ export function Passphrase() {
       <Spacer />
       {ready ? <button class="btn-primary" onClick={create}>{restore ? (on ? 'Restore with passphrase' : 'Restore without passphrase') : on ? 'Create wallet with passphrase' : 'Create wallet without passphrase'}</button>
         : <button class="btn-primary" disabled>{p1 ? 'Enter the same passphrase twice' : 'Enter a passphrase'}</button>}
+      <Keyboard kb={kb} targets={on ? {
+        p1: { label: 'Passphrase', layout: 'text', mask: true, value: p1, onChange: setP1, anchor: 'pp1' },
+        p2: { label: 'Repeat passphrase', layout: 'text', mask: true, value: p2, onChange: setP2, anchor: 'pp2' },
+      } : {}} />
     </FlowShell>
   );
 }

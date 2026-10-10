@@ -15,7 +15,7 @@ export function Sheet() {
   const { sheet } = useStore();
   useEffect(() => {
     if (!sheet) return;
-    const f = (e) => { if (e.key === 'Escape') close(); };
+    const f = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
     window.addEventListener('keydown', f);
     return () => window.removeEventListener('keydown', f);
   }, [sheet]);
@@ -142,8 +142,11 @@ function ImportBody({ s }) {
     ['image', 'QR image', 'A picture of a QR from your computer', I.IImage],
     ['file', 'File', 'Text or binary file · or drop it on this page', I.IFile],
   ].filter((x) => !(s.only && !s.only.includes(x[0])) && !(x[0] === 'type' && s.noType));
+  // Private fields with an on-screen keyboard offer it first.
+  if (s.priv && s.kb) O.unshift(['kbd', 'On-screen keyboard', 'Click the keys. Nothing goes through the computer keyboard, so a keylogger can’t record it.', I.IKeyboard]);
   const pick = async (k) => {
     setMsg('');
+    if (k === 'kbd') { close(); s.kb(); return; }
     if (k === 'type') {
       close();
       if (s.onType) s.onType();

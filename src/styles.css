@@ -357,3 +357,36 @@ pre.json { margin: 0; padding: 12px 14px; background: var(--surface); border: 1p
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 80; background: var(--surface); border: 1px solid var(--line2); padding: 10px 16px; font-size: 14px; max-width: calc(100vw - 32px); }
 /* Browsers without -webkit-text-security (Firefox) blur the typed private keys instead. */
 @supports not (-webkit-text-security: disc) { .masked { filter: blur(5px); } .masked:focus { filter: blur(3px); } }
+
+/* ---- on-screen keyboard (Keyboard.jsx) ---- */
+label.wordcell.kbon { border: 2px solid var(--accent); padding: 0 7px; }
+.fbtns { display: flex; gap: 8px; flex-shrink: 0; }
+.fbtns.col { flex-direction: column; }
+.kbd { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; display: flex; justify-content: center; background: var(--line); border-top: 1px solid var(--line2); padding: 12px 12px calc(16px + env(safe-area-inset-bottom, 0px)); color: var(--text); font-family: var(--sans); }
+.kbd-in { width: 100%; max-width: 760px; display: flex; flex-direction: column; gap: 8px; }
+.kbd-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.kbd-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kbd-title b { font-size: 15px; }
+.kbd-tag { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--danger); }
+.kbd-tools { display: flex; align-items: center; gap: 8px; }
+.kbd-shuf { height: 36px; padding: 0 12px; border: 1px solid var(--accent); background: transparent; color: var(--accent); font: 600 13px var(--sans); cursor: pointer; }
+.kbd-shuf.on { border-color: var(--primary); background: var(--primary); color: var(--on-primary); }
+.kbd-x { width: 36px; height: 36px; border: none; background: transparent; color: var(--text); cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
+.kbd-prev { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 6px 6px 12px; background: var(--bg); border: 1px solid var(--line2); }
+.kbd-prev .v { flex: 1 1 auto; min-width: 0; white-space: pre-wrap; word-break: break-all; font: 400 16px var(--mono); letter-spacing: 0.04em; color: var(--text); max-height: 4.8em; overflow-y: auto; }
+.kbd-prev .v.ph { color: var(--dim); }
+.kbd-prev .c { flex-shrink: 0; font-size: 12px; color: var(--dim); }
+.kbd-prev .sh { flex-shrink: 0; height: 32px; padding: 0 10px; border: 1px solid var(--line2); background: transparent; color: var(--text); font: 600 13px var(--sans); cursor: pointer; }
+.kbd-sugg { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 38px; }
+.kbd-sugg button { height: 38px; padding: 0 14px; border: 1px solid var(--line2); background: var(--surface); color: var(--text); font: 500 15px var(--mono); cursor: pointer; }
+.kbd-sugg button.exact { border-color: var(--accent); }
+.kbd-sugg .hint { font-size: 12px; line-height: 1.4; color: var(--muted); }
+.kbd-rows { display: flex; flex-direction: column; gap: 6px; }
+.kbd-row { display: flex; justify-content: center; gap: 5px; }
+.kk { flex: 1 1 0; max-width: 58px; min-width: 0; height: 46px; padding: 0; border: none; cursor: pointer; font: 500 18px var(--sans); color: var(--text); background: var(--surface); box-shadow: 0 1px 0 var(--line2); touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+.kk.dim { background: #22262C; color: var(--line2); box-shadow: none; }
+.kk.fn { font-size: 15px; font-weight: 600; background: #3A414C; box-shadow: none; }
+.kk.fn.on { background: var(--primary); color: var(--on-primary); }
+/* The same hover on every key and button of the panel. */
+.kbd button:hover { filter: brightness(1.25); }
+@media (max-width: 420px) { .kk { height: 42px; font-size: 17px; } .kk.fn { font-size: 13px; } .kbd-row { gap: 4px; } .kbd { padding-left: 6px; padding-right: 6px; } }

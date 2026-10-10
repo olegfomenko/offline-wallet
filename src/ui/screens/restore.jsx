@@ -4,6 +4,8 @@ import { useState, useMemo } from 'preact/hooks';
 import { go } from '../router.js';
 import { getState, setState, patch, useStore } from '../store.js';
 import { FlowShell, TitleRow, StepRow, Seg, Spacer, OutField, ExportBtn, PrivChip, InField, HiddenInField, ImportBtn, I, Card } from '../kit.jsx';
+import { Keyboard, KbdButton, useKbd } from '../Keyboard.jsx';
+import { firstEmpty } from '../kbd.js';
 import { WORDSET, normalizeWords, isValidMnemonic, walletFromCustom, readXkey, walletFromXkey, walletFromKeys, account, addressAt, seedQRDecode, compactSeedQRDecode, customSeedText } from '../../core/wallet.js';
 import { parseKeyLine, looksExtended, decryptBIP38, keyAddress, encodeWIF, pubOf, ELECTRUM_PREFIX } from '../../core/keys.js';
 import { TYPES } from '../../core/hd.js';
@@ -23,13 +25,14 @@ export function wordsFromInput(v) {
   return normalizeWords(s.replace(/(^|\s)\d+[.):]?(?=\s)/g, ' '));
 }
 
-export function SeedCells({ words, len, onChange, prefix = 'sw' }) {
+/** `active`: the word the on-screen keyboard is on (−1 when closed); `onPick(i)` moves it there. */
+export function SeedCells({ words, len, onChange, prefix = 'sw', active = -1, onPick }) {
   const cells = [];
   for (let i = 0; i < len; i++) {
     const w = (words[i] || '').trim().toLowerCase();
     const bad = w !== '' && !WORDSET.has(w);
     cells.push(
-      <label for={prefix + i} class={'wordcell' + (bad ? ' bad' : w ? ' filled' : '')}>
+      <label for={prefix + i} class={'wordcell' + (bad ? ' bad' : w ? ' filled' : '') + (i === active ? ' kbon' : '')} onClick={onPick ? () => onPick(i) : undefined}>
         <span class="n">{i + 1}</span>
         <input id={prefix + i} type="text" value={words[i] || ''} autocomplete="off" autocapitalize="none" spellcheck={false} aria-label={'Word ' + (i + 1)}
           onInput={(e) => {
@@ -58,6 +61,8 @@ export function RestoreSeed() {
   const [err, setErr] = useState('');
   const G = seedStats(words, len);
   const setWords = (w) => { setErr(''); patch('flow', { words: w }); };
+  const kb = useKbd();
+  const openKb = () => kb.open('seed', firstEmpty(words, len));
   const note = err || (G.bad ? G.bad + (G.bad === 1 ? ' word is' : ' words are') + ' not on the BIP39 list.' : G.complete ? 'All ' + len + ' words entered. The checksum is verified before restoring.' : G.filled + ' of ' + len + ' words. Each word is checked against the BIP39 list as you type.');
   const restore = () => {
     const w = words.slice(0, len).map((x) => x.trim().toLowerCase());
@@ -73,19 +78,23 @@ export function RestoreSeed() {
         <div class="field" style={{ gap: '8px' }}>
           <div class="fhead">
             <span class="flabel">Seed words<PrivChip /></span>
-            <ImportBtn spec={{ title: 'Seed words', priv: true, focusId: 'sw0', onValue: (v) => {
-              const w = wordsFromInput(v);
-              if (w.length !== 12 && w.length !== 24) return { error: 'Read ' + w.length + ' words. Expected 12 or 24.' };
-              patch('flow', { len: w.length, words: w });
-            } }} />
+            <span class="fbtns">
+              <KbdButton what="seed words" open={kb.id === 'seed'} onClick={openKb} />
+              <ImportBtn spec={{ title: 'Seed words', priv: true, focusId: 'sw0', kb: openKb, onValue: (v) => {
+                const w = wordsFromInput(v);
+                if (w.length !== 12 && w.length !== 24) return { error: 'Read ' + w.length + ' words. Expected 12 or 24.' };
+                patch('flow', { len: w.length, words: w });
+              } }} />
+            </span>
           </div>
-          <SeedCells words={words} len={len} onChange={setWords} />
+          <SeedCells words={words} len={len} onChange={setWords} active={kb.id === 'seed' ? kb.i : -1} onPick={(i) => { if (kb.id === 'seed') kb.setI(i); }} />
           <span class={'note' + (err || G.bad ? ' err' : '')}>{note}</span>
         </div>
         <button class="linkbtn big" onClick={() => go('custom-seed')}>Words not from the BIP39 list?</button>
         <button class="linkbtn big" style={{ marginTop: '-10px' }} onClick={() => go('restore-key')}>Restore from a private key instead</button>
       </div>
       {G.complete ? <button class="btn-primary" onClick={restore}>Restore wallet</button> : <button class="btn-primary" disabled>{G.bad ? 'Fix the marked words' : 'Enter all ' + len + ' words'}</button>}
+      <Keyboard kb={kb} targets={{ seed: { label: 'Seed words', layout: 'seed', len, value: words, onChange: setWords, anchor: (i) => 'sw' + i } }} />
     </FlowShell>
   );
 }
@@ -96,6 +105,7 @@ export function CustomSeed() {
   const [step, setStep] = useState(1);
   const [text, setText] = useState(flow.customDraft || '');
   const [ack, setAck] = useState(false);
+  const kb = useKbd();
   const words = text.trim().split(/\s+/).filter(Boolean);
   const notIn = words.filter((w) => !WORDSET.has(w.toLowerCase())).length;
   const exact = customSeedText(text);
@@ -130,7 +140,8 @@ export function CustomSeed() {
               <span class="muted">Restore a test seed, even a single word like "test", here and in Electrum with the BIP39 option on. For a test the other device doesn't have to be offline. Fingerprint and first address must match. Never send funds to that test wallet.</span>
             </div>
           </div>
-          <InField id="custom" label="Custom words" priv textarea mono={false} value={text} onInput={setText} note="Any words, any number of them, any language." />
+          <InField id="custom" label="Custom words" priv textarea mono={false} value={text} onInput={setText} note="Any words, any number of them, any language."
+            kb={{ what: 'custom seed words', isOpen: kb.id === 'custom', open: () => kb.open('custom') }} />
           {words.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
               <span class="tagbox" style={{ fontSize: '13px', padding: '5px 10px', background: 'var(--surface)', border: '1px solid var(--line)' }}>{words.length} word{words.length > 1 ? 's' : ''}</span>
@@ -156,12 +167,13 @@ export function CustomSeed() {
         </div>
       )}
       <Spacer />
-      {step === 1 ? (exact ? <button class="btn-primary" onClick={() => setStep(2)}>Check result</button> : <button class="btn-primary" disabled>Enter the words</button>) : (
+      {step === 1 ? (exact ? <button class="btn-primary" onClick={() => { kb.close(); setStep(2); }}>Check result</button> : <button class="btn-primary" disabled>Enter the words</button>) : (
         <div class="btncol">
           {ack ? <button class="btn-primary" onClick={() => { patch('flow', { origin: 'restore', custom: exact, words: null }); setText(''); go('passphrase'); }}>Restore with these words</button> : <button class="btn-primary" disabled>Confirm the risk to continue</button>}
           <button class="btn-secondary" onClick={() => { setStep(1); setAck(false); }}>Edit words</button>
         </div>
       )}
+      <Keyboard kb={kb} targets={step === 1 ? { custom: { label: 'Custom seed words', layout: 'text', mask: false, value: text, onChange: setText, anchor: 'custom' } } : {}} />
     </FlowShell>
   );
 }
@@ -172,6 +184,7 @@ export function RestoreKey() {
   const [kind, setKind] = useState(flow.keyKind || 'master');
   const [raw, setRaw] = useState('');
   const [typing, setTyping] = useState(false);
+  const kb = useKbd();
   const [err, setErr] = useState('');
   const master = kind === 'master';
   const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
@@ -209,6 +222,7 @@ export function RestoreKey() {
       <Seg items={[['master', 'Master key'], ['single', 'Single keys']]} value={kind} onChange={(k) => { setKind(k); setErr(''); }} />
       <span class="small">{master ? 'An extended private key, like Electrum’s “Use a master key”. All addresses are derived from it.' : 'One or more keys for individual addresses, like Electrum’s “Import private keys”. One per line.'}</span>
       <HiddenInField label={master ? 'Private key or extended key' : 'Private keys'} has={lines.length > 0} count={master ? '1 key' : lines.length + ' key' + (lines.length > 1 ? 's' : '')}
+        id="rk-key" kb={{ what: 'the private key', isOpen: kb.id === 'key', open: () => kb.open('key') }}
         onValue={(v) => { setRaw(typeof v === 'string' ? v : new TextDecoder().decode(v)); setErr(''); }}
         onType={() => setTyping(true)}
         note={master ? 'Type, paste, scan or load it. It stays hidden; the next screen shows what it opens.' : 'Type, paste, scan or load them, one per line. They stay hidden; the next screen shows what they open.'} />
@@ -227,6 +241,7 @@ export function RestoreKey() {
       {err && <span class="note err">{err}</span>}
       <Spacer />
       {lines.length ? <button class="btn-primary" onClick={check}>Check key</button> : <button class="btn-primary" disabled>Enter a key</button>}
+      <Keyboard kb={kb} targets={{ key: { label: master ? 'Master private key' : 'Private keys, one per line', layout: 'text', mask: true, multiline: !master, value: raw, onChange: (v) => { setRaw(v); setErr(''); }, anchor: 'rk-key' } }} />
     </FlowShell>
   );
 }
@@ -288,6 +303,11 @@ export function CheckSingleKeys() {
   const up = (i, p) => setKeys((ks) => ks.map((k, j) => (j === i ? { ...k, ...p } : k)));
   const ready = keys.filter((k) => k.priv);
   const mixedNets = new Set(ready.map((k) => (k.net === 'test' ? 'test' : 'main'))).size > 1;
+  const kb = useKbd();
+  const pwTargets = {};
+  keys.forEach((k, i) => {
+    if (k.kind === 'bip38' && !k.priv) pwTargets['pw' + i] = { label: 'BIP38 password' + (keys.length > 1 ? ' · key ' + (i + 1) : ''), layout: 'text', mask: true, value: k.pw, onChange: (v) => up(i, { pw: v }), anchor: 'bip38pw' + i };
+  });
   const decrypt = async (i) => {
     up(i, { busy: true, err: '', prog: 0 });
     try {
@@ -311,8 +331,9 @@ export function CheckSingleKeys() {
             {k.kind === 'bip38' && !k.priv && (
               <>
                 <InField id={'bip38pw' + i} label="Password" priv password mono={false} value={k.pw} onInput={(v) => up(i, { pw: v })} placeholder="Password"
+                  kb={{ what: 'the BIP38 password', isOpen: kb.id === 'pw' + i, open: () => kb.open('pw' + i) }}
                   note={k.err || (k.busy ? 'Decrypting… ' + Math.round((k.prog || 0) * 100) + '%' : 'Decrypting takes a few seconds on purpose.')} noteCls={k.err ? 'err' : ''} />
-                <button class="btn-secondary btn-sm" disabled={k.busy || !k.pw} onClick={() => decrypt(i)}>{k.busy ? 'Decrypting…' : 'Decrypt'}</button>
+                <button class="btn-secondary btn-sm" disabled={k.busy || !k.pw} onClick={() => { kb.close(); decrypt(i); }}>{k.busy ? 'Decrypting…' : 'Decrypt'}</button>
               </>
             )}
             {k.kind === 'hex' && (
@@ -352,6 +373,7 @@ export function CheckSingleKeys() {
         setState({ wallet: wk, flow: { origin: 'restore', done: true }, settings: { ...settings, net: wk.net } });
         go('wallet-ready');
       }}>Create wallet from {ready.length} key{ready.length > 1 ? 's' : ''}</button> : <button class="btn-primary" disabled>{mixedNets ? 'Keys from different networks' : 'Decrypt a key first'}</button>}
+      <Keyboard kb={kb} targets={pwTargets} />
     </FlowShell>
   );
 }
