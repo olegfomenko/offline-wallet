@@ -2,7 +2,7 @@
 import { h, Fragment } from 'preact';
 import { useState, useEffect, useMemo } from 'preact/hooks';
 import { go } from '../router.js';
-import { getState, setState, patch, useStore, addLog, noteSeen } from '../store.js';
+import { getState, setState, patch, useStore, addLog, noteSeen, signNetOf } from '../store.js';
 import { NavShell, TitleRow, Seg, UTabs, Spacer, OutField, ExportBtn, InField, I, Card, Addr, fmtAmt, unitName, shortAddr, KV, Section } from '../kit.jsx';
 import { classify, classifyPayload, psbtQRFrames, base43 } from '../../core/transport.js';
 import { parsePsbt, analyzePsbt, signPsbt, psbtJSON, fmtPct, fmtRate, fmtDate } from '../../core/psbt.js';
@@ -20,13 +20,22 @@ const WALLETS = [
 ];
 
 export function SourceWallet() {
-  const { tx } = useStore();
+  const st = useStore();
+  const { tx } = st;
   const cur = tx.source || 'sparrow';
   const W = WALLETS.find((x) => x[0] === cur);
+  const net = signNetOf(st);
   return (
     <NavShell max={720} gap={14}>
       <TitleRow back="main" title="Sign a transaction" />
-      <span style={{ fontSize: '17px', fontWeight: 600 }}>Which wallet made the transaction?</span>
+      <div class="stack" style={{ gap: '6px' }}>
+        <span id="sw-net" style={{ fontSize: '15px', fontWeight: 600 }}>Network</span>
+        <Seg items={[['main', 'Mainnet'], ['test', 'Testnet'], ['signet', 'Signet'], ['regtest', 'Regtest']]} value={net} labelledBy="sw-net" onChange={(v) => patch('settings', { signNet: v })} />
+        <span class="note" style={{ color: net === 'main' ? 'var(--muted)' : 'var(--warn)' }}>{net === 'main'
+          ? 'Real bitcoin. Pick the network your online wallet uses; a transaction for another network is blocked.'
+          : 'Test coins with no value. Addresses and keys use the ' + (net === 'regtest' ? 'regtest (bcrt1…)' : 'testnet (tb1…)') + ' format; a mainnet transaction is blocked.'}</span>
+      </div>
+      <span style={{ fontSize: '17px', fontWeight: 600, marginTop: '8px' }}>Which wallet made the transaction?</span>
       <span class="small" style={{ marginTop: '-8px' }}>So we can tell you where to find it there, and send the signed result back in a form it reads.</span>
       <div class="stack" style={{ gap: '8px' }}>
         {WALLETS.map(([id, name, how, fmt]) => (
@@ -89,7 +98,7 @@ export function LoadTransaction() {
     try {
       const t = parsePsbt(r.bytes);
       const w = getState().wallet;
-      const a = analyzePsbt(t, w, { net: st.settings.net, feeLimitPct: st.settings.feeLimit });
+      const a = analyzePsbt(t, w, { net: signNetOf(st), feeLimitPct: st.settings.feeLimit });
       patch('tx', { txObj: t, analysis: a, acks: {}, signed: null, bytes: r.bytes, format: r.format });
       go('review');
     } catch (e) { setErr(e.message); }

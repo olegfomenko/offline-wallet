@@ -5,7 +5,9 @@ import { closeWallet } from '../core/wallet.js';
 
 const initial = () => ({
   wallet: null,
-  settings: { unit: 'btc', net: 'main', feeLimit: 5, depth: 1000 },
+  // net: the Addresses screen's network. signNet: the network PSBTs are reviewed for (Sign a
+  // transaction); null until picked, then it follows the wallet's own network.
+  settings: { unit: 'btc', net: 'main', signNet: null, feeLimit: 5, depth: 1000 },
   flow: {},          // create / restore flow scratch (seed words in progress etc.)
   addr: { type: 'wpkh', acct: 0, cpath: {}, kmode: 'pub', branch: 0, idx: 0, fmt: 'slip' },
   addrSel: null,     // address opened on the detail screen
@@ -75,4 +77,9 @@ export function noteSeen(ours, theirs) {
   for (const o of ours) seen.ours.set(o.addr, { ...o, last: now });
   for (const t of theirs) if (!seen.ours.has(t.addr)) seen.theirs.set(t.addr, { ...t, last: now });
   setState({ seen });
+}
+
+/** The network PSBTs are reviewed and signed for. */
+export function signNetOf(st) {
+  return st.settings.signNet || (st.wallet && st.wallet.net === 'test' ? 'test' : 'main');
 }

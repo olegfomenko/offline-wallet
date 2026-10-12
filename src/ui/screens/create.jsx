@@ -6,7 +6,7 @@ import { getState, setState, patch, useStore } from '../store.js';
 import { FlowShell, StepRow, Seg, Switch, Spacer, OutField, ExportBtn, PrivChip, InField, I, Card, walletLabel, useNet } from '../kit.jsx';
 import { environment } from '../env.js';
 import { Keyboard, useKbd } from '../Keyboard.jsx';
-import { makeEntropy, countedBits } from '../../core/entropy.js';
+import { makeEntropy, countedBits, neededBits, DICE_BITS } from '../../core/entropy.js';
 import { mnemonicFromEntropy, walletFromMnemonic, walletFromCustom, seedQREncode, wordlist } from '../../core/wallet.js';
 import { randomInt, wipe } from '../../core/util.js';
 
@@ -128,18 +128,21 @@ export function Randomness() {
 export function AddRandomness() {
   const [S, set] = useState({ tab: 'dice', dice: [], coins: [], strokes: [], cur: null, adv: false, device: true });
   const up = (p) => set((s) => ({ ...s, ...p }));
+  // 12 words carry 128 bits, 24 words 256: that much from dice and coins is enough on its own.
+  const words = (getState().flow.len || 24) === 12 ? 12 : 24;
+  const need = neededBits(words);
   const exact = countedBits(S.dice, S.coins);
   const bits = Math.floor(exact);
-  const enough = bits >= 128;
+  const enough = bits >= need;
   const points = S.strokes.reduce((n, s) => n + s.length, 0) + (S.cur ? S.cur.length : 0);
   const anyInput = S.dice.length + S.coins.length + points > 0;
   const canCreate = S.device || enough;
   let meter, meterCol = 'var(--muted)';
   if (enough) { meter = 'Enough on its own. More is fine.'; meterCol = 'var(--accent)'; }
-  else if (!S.device) { meter = 'Device randomness is off: add ' + (128 - bits) + ' more bits to create the key.'; meterCol = 'var(--danger)'; }
+  else if (!S.device) { meter = 'Device randomness is off: a ' + words + '-word seed needs ' + need + ' bits. Add ' + (need - bits) + ' more (about ' + Math.ceil((need - bits) / DICE_BITS) + ' rolls).'; meterCol = 'var(--danger)'; }
   else if (anyInput) meter = 'Every bit helps. The device generator already makes the key safe.';
-  else meter = '128 bits (about 50 rolls or 128 flips) is enough on its own.';
-  const cta = !canCreate ? 'Add ' + (128 - bits) + ' more bits' : !anyInput ? 'Create key with device only' : 'Create key';
+  else meter = need + ' bits (about ' + Math.ceil(need / DICE_BITS) + ' rolls or ' + need + ' flips) is enough on its own for ' + words + ' words.';
+  const cta = !canCreate ? 'Add ' + (need - bits) + ' more bits' : !anyInput ? 'Create key with device only' : 'Create key';
   const seq = (xs, empty) => (!xs.length ? empty : (xs.length > 60 ? '… ' : '') + xs.slice(-60).join(' '));
   const padRef = useRef(null);
   const pt = (e) => {
@@ -159,9 +162,9 @@ export function AddRandomness() {
       <div class="stack" style={{ gap: '8px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
           <span class="small">Counted from dice and coins</span>
-          <span class="mono" style={{ fontSize: '18px' }}>{bits} <span class="small">/ 128 bits</span></span>
+          <span class="mono" style={{ fontSize: '18px' }}>{bits} <span class="small">/ {need} bits</span></span>
         </div>
-        <div class="meter" role="progressbar" aria-label="Bits added" aria-valuemin="0" aria-valuemax="128" aria-valuenow={bits}><i style={{ width: Math.min(100, Math.round((exact / 128) * 100)) + '%', background: enough ? 'var(--accent)' : 'var(--primary)' }} /></div>
+        <div class="meter" role="progressbar" aria-label="Bits added" aria-valuemin="0" aria-valuemax={need} aria-valuenow={bits}><i style={{ width: Math.min(100, Math.round((exact / need) * 100)) + '%', background: enough ? 'var(--accent)' : 'var(--primary)' }} /></div>
         <span class="note" style={{ color: meterCol }}>{meter}</span>
         <span class="note">{[S.dice.length + ' rolls', S.coins.length + ' flips', points ? 'drawing: ' + points + ' points, not counted' : 'no drawing'].join(' · ')}</span>
       </div>
@@ -210,7 +213,7 @@ export function AddRandomness() {
               <div class="warnline" style={{ flexDirection: 'column', gap: '6px' }}>
                 <b>Your input alone makes the key</b>
                 <span class="muted">Use this only if you don't trust the browser's generator. The key is the hash of your rolls and flips, so the same rolls always give the same key.</span>
-                <span class="muted">Any written record of your rolls is as secret as the key itself. You need at least 128 bits from dice and coins; the drawing still mixes in but doesn't count.</span>
+                <span class="muted">Any written record of your rolls is as secret as the key itself. For a {words}-word seed you need at least {need} bits from dice and coins; the drawing still mixes in but doesn't count.</span>
               </div>
             )}
           </>

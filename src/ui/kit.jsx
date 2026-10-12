@@ -153,9 +153,9 @@ export function StepRow({ back, onBack, step, of = 6, label }) {
   );
 }
 
-export function Seg({ items, value, onChange, cls = '', cols }) {
+export function Seg({ items, value, onChange, cls = '', cols, labelledBy }) {
   return (
-    <div class={'seg ' + cls} role="group" style={{ gridTemplateColumns: 'repeat(' + (cols || items.length) + ', minmax(0, 1fr))' }}>
+    <div class={'seg ' + cls} role="group" aria-labelledby={labelledBy} style={{ gridTemplateColumns: 'repeat(' + (cols || items.length) + ', minmax(0, 1fr))' }}>
       {items.map(([id, label]) => <button type="button" aria-pressed={value === id ? 'true' : 'false'} class={value === id ? 'on' : ''} onClick={() => onChange(id)}>{label}</button>)}
     </div>
   );

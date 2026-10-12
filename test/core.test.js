@@ -9,7 +9,7 @@ import { hex, utf8, base64 } from '../src/core/util.js';
 import { descChecksum, parseDescriptor, parseExt, serializeExt, addressOf, decodeAddress, withChecksum, TYPES } from '../src/core/hd.js';
 import { walletFromMnemonic, walletFromCustom, readXkey, walletFromXkey, walletFromKeys, accountKeys, account, addressAt, lastWordCandidates, isValidMnemonic, seedQREncode, seedQRDecode, customSeedText } from '../src/core/wallet.js';
 import { decodeWIF, encodeWIF, parseKeyLine, decryptBIP38, pubOf, keyAddress, looksExtended, ELECTRUM_PREFIX } from '../src/core/keys.js';
-import { makeEntropy, countedBits } from '../src/core/entropy.js';
+import { makeEntropy, countedBits, neededBits } from '../src/core/entropy.js';
 import { signMessageECDSA, verifyMessageECDSA, signMessageSchnorr, verifyMessageSchnorr } from '../src/core/message.js';
 import { base43, BBQrDecoder, bbqrSplit, classify, MultiPartCollector, psbtQRFrames } from '../src/core/transport.js';
 import { parsePsbt, analyzePsbt, signPsbt, psbtJSON } from '../src/core/psbt.js';
@@ -117,6 +117,13 @@ test('entropy mixing', () => {
   const b = makeEntropy({ bytes: 16, device: false, dice: Array(50).fill(3) });
   expect(hex.encode(a)).toBe(hex.encode(b));
   expect(() => makeEntropy({ bytes: 16, device: false, dice: [1] })).toThrow();
+  // Without device randomness the dice must carry the seed's full entropy: 128 bits for 12 words, 256 for 24.
+  expect(neededBits(12)).toBe(128);
+  expect(neededBits(24)).toBe(256);
+  expect(makeEntropy({ bytes: 32, device: false, dice: Array(100).fill(4) }).length).toBe(32); // 258.5 bits
+  expect(() => makeEntropy({ bytes: 32, device: false, dice: Array(50).fill(4) })).toThrow(/256 bits/); // 129 bits
+  expect(() => makeEntropy({ bytes: 32, device: false, dice: Array(98).fill(4), coins: [] })).toThrow(/256 bits/); // 253.3 bits
+  expect(makeEntropy({ bytes: 32, device: false, dice: Array(98).fill(4), coins: Array(3).fill('H') }).length).toBe(32); // 256.3 bits
   expect(Math.floor(countedBits(Array(50).fill(1), []))).toBe(129);
 });
 

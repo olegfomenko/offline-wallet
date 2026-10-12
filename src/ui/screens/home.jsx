@@ -18,11 +18,9 @@ export function Main() {
   const st = useStore();
   const w = st.wallet;
   const psbts = st.log.filter((x) => x.kind === 'psbt').length, msgs = st.log.length - psbts;
-  const net = st.settings.net;
   const seedLabel = { seed: 'Seed words', custom: 'Custom words', xkey: 'Master key', keys: 'Private keys' }[w.kind];
   return (
     <NavShell>
-      {net !== 'main' && <a class="netbanner" href="#/settings"><span>{NETS[net].name.toUpperCase()} · coins have no value</span><span style={{ fontWeight: 500 }}>Change</span></a>}
       <div class="stack">
         <div class="caps">Wallet</div>
         <h1 style={{ fontWeight: 600 }}>{walletLabel(w)}</h1>

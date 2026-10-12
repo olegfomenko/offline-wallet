@@ -29,13 +29,18 @@ export function hashUserInput({ dice = [], coins = [], strokes = [] }) {
   return h;
 }
 
+/** Bits of dice and coins a seed needs on its own: 128 for 12 words, 256 for 24 (the seed's entropy). */
+export function neededBits(words) { return words === 12 ? 128 : 256; }
+
 /**
- * Make seed entropy of `bytes` (16 or 32). With device randomness on, user input is optional;
- * with it off, at least 128 counted bits are required.
+ * Make seed entropy of `bytes` (16 for 12 words, 32 for 24). With device randomness on, user input is
+ * optional; with it off, the dice and coins must carry as many bits as the seed: 128 or 256.
  */
 export function makeEntropy({ bytes, device = true, dice = [], coins = [], strokes = [] }) {
+  if (bytes !== 16 && bytes !== 32) throw new Error('Seed entropy is 16 or 32 bytes.');
   const any = dice.length + coins.length + strokes.reduce((n, s) => n + s.length, 0) > 0;
-  if (!device && countedBits(dice, coins) < 128) throw new Error('Need at least 128 bits from dice and coins.');
+  const need = bytes * 8;
+  if (!device && countedBits(dice, coins) < need) throw new Error('Need at least ' + need + ' bits from dice and coins.');
   const user = any ? hashUserInput({ dice, coins, strokes }) : new Uint8Array(32);
   const dev = device ? randomBytes(32) : new Uint8Array(32);
   const mixed = user.map((b, i) => b ^ dev[i]);
