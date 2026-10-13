@@ -244,7 +244,7 @@ function PointIn({ id, label, f, onChange }) {
 const pointOf = (f) => (f.g ? G : f.v.trim() === '' ? null : parsePoint(decodeBytes(f.v, f.enc)).pt || null);
 
 export function Secp256k1Tool() {
-  const [S, set0] = useState({ op: 'mul', fmt: 'comp', kEnc: 'dec', k: '3', rEnc: 'hex', p: { g: true, v: '', enc: 'hex' }, q: { g: false, v: '02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5', enc: 'hex' } });
+  const [S, set0] = useState({ op: 'mul', fmt: 'comp', kEnc: 'dec', k: '', rEnc: 'hex', p: { g: false, v: '', enc: 'hex' }, q: { g: false, v: '', enc: 'hex' } });
   const set = (p) => set0((s) => ({ ...s, ...p }));
   const kv = parseNum(S.k, S.kEnc);
   const kRed = kv === null ? null : modN(kv);
