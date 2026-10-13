@@ -5,6 +5,10 @@ import * as btc from '@scure/btc-signer';
 import { hex, equal, utf8, sha256d } from './util.js';
 import { HARDENED_OFFSET, payment, scriptToAddress, scriptKind, formatPath, fpHex, NETS, xonly } from './hd.js';
 import { pubOf } from './keys.js';
+import { getPrevOut } from '@scure/btc-signer/transaction.js';
+import { taprootTweakPrivKey } from '@scure/btc-signer/utils.js';
+import { schnorr } from '@noble/curves/secp256k1.js';
+import { ecdsaSignerNonce, ecdsaSignAntiExfil, schnorrSignerNonce, schnorrSignAntiExfil } from './antiexfil.js';
 
 const TX_OPTS = {
   unknown: 'ignore', proprietary: 'ignore', allowUnknownOutputs: true, allowUnknownInputs: true,
@@ -320,27 +324,25 @@ export function analyzePsbt(tx, w, { net = 'main', feeLimitPct = 5 } = {}) {
   };
 }
 
-/**
- * Sign every input of this wallet on a copy of the PSBT; nothing is changed unless all succeed.
- * Returns { psbt, final, txHex, txid, signedCount }.
- */
-export function signPsbt(tx, analysis, w) {
+/** A copy of the PSBT with what we know and the PSBT left out filled in, so signing doesn't fail on it. */
+function signingCopy(tx, analysis) {
   if (!analysis.canSign) throw new Error('This transaction has blockers or missing data.');
   const t = btc.Transaction.fromPSBT(tx.toPSBT(), TX_OPTS);
-  let signed = 0;
-  const allowed = [btc.SigHash.DEFAULT, btc.SigHash.ALL];
+  const todo = [];
   for (const inp of analysis.inputs) {
     if (!inp.own || inp.finalized) continue;
     const idx = inp.n - 1;
     const cur = t.getInput(idx);
-    // Fill in what we know and the PSBT left out, so signing doesn't fail on it.
     if (inp.own.type === 'shwpkh' && !cur.redeemScript) t.updateInput(idx, { redeemScript: payment('shwpkh', inp.own.pub, analysis.net).redeemScript });
     if (inp.own.type === 'tr' && !cur.tapInternalKey) t.updateInput(idx, { tapInternalKey: xonly(inp.own.pub) });
     const priv = inp.own.node ? inp.own.node.privateKey : inp.own.priv;
     if (!priv) throw new Error('Input ' + inp.n + ': no private key.');
-    if (!t.signIdx(priv, idx, allowed)) throw new Error('Input ' + inp.n + ' could not be signed.');
-    signed++;
+    todo.push({ inp, idx, priv });
   }
+  return { t, todo };
+}
+
+function finishSigned(t, analysis, signed) {
   if (!signed && !analysis.inputs.some((x) => x.own && x.signedAlready)) throw new Error('No input could be signed.');
   const psbt = t.toPSBT();
   let final = false, txHex = null, txid = analysis.txid;
@@ -353,6 +355,88 @@ export function signPsbt(tx, analysis, w) {
   } catch (e) { /* someone else still has to sign */ }
   return { psbt, final, txHex, txid, signedCount: signed };
 }
+
+/**
+ * Sign every input of this wallet on a copy of the PSBT; nothing is changed unless all succeed.
+ * Returns { psbt, final, txHex, txid, signedCount }.
+ */
+export function signPsbt(tx, analysis, w) {
+  const { t, todo } = signingCopy(tx, analysis);
+  const allowed = [btc.SigHash.DEFAULT, btc.SigHash.ALL];
+  let signed = 0;
+  for (const { inp, idx, priv } of todo) {
+    if (!t.signIdx(priv, idx, allowed)) throw new Error('Input ' + inp.n + ' could not be signed.');
+    signed++;
+  }
+  return finishSigned(t, analysis, signed);
+}
+
+// ---- anti-exfil signing: the same inputs, signed with host-committed nonces (antiexfil.js) ----
+
+/** The BIP143 / legacy / BIP341 sighash scure-btc-signer would sign for this input. */
+function sighashOf(t, idx, type) {
+  const input = t.getInput(idx);
+  const prev = getPrevOut(input);
+  if (type === 'tr') {
+    const sighash = input.sighashType === undefined ? btc.SigHash.DEFAULT : input.sighashType;
+    const prevs = Array.from({ length: t.inputsLength }, (_, i) => getPrevOut(t.getInput(i)));
+    return { sighash, hash: t.preimageWitnessV1(idx, prevs.map((p) => p.script), sighash, prevs.map((p) => p.amount)) };
+  }
+  const sighash = input.sighashType === undefined ? btc.SigHash.ALL : input.sighashType;
+  if (type === 'pkh') return { sighash, hash: t.preimageLegacy(idx, prev.script, sighash) };
+  // P2WPKH and P2SH-P2WPKH: the script code is the P2PKH script of the key hash (BIP143).
+  const wp = type === 'wpkh' ? prev.script : input.redeemScript;
+  const k = btc.OutScript.decode(wp);
+  if (k.type !== 'wpkh') throw new Error('Unexpected script for input ' + (idx + 1) + '.');
+  return { sighash, hash: t.preimageWitnessV0(idx, btc.OutScript.encode({ type: 'pkh', hash: k.hash }), sighash, prev.amount) };
+}
+
+/**
+ * Prepare anti-exfil signing: one nonce per input of this wallet. Returns
+ * { t, items: [{ n, idx, alg: 'ecdsa'|'schnorr', address, amount, path, hash, sighash, key, pub }] }.
+ * `key` is the signing key (tweaked for Taproot key path). Keep it in memory only.
+ */
+export function prepareAntiExfil(tx, analysis) {
+  const { t, todo } = signingCopy(tx, analysis);
+  const items = todo.map(({ inp, idx, priv }) => {
+    const type = inp.own.type;
+    const { hash, sighash } = sighashOf(t, idx, type);
+    if (type === 'tr') {
+      if (t.getInput(idx).tapMerkleRoot) throw new Error('Input ' + inp.n + ': Taproot script trees aren’t supported.');
+      const key = taprootTweakPrivKey(priv);
+      return { n: inp.n, idx, alg: 'schnorr', type, address: inp.address, amount: inp.amount, path: inp.own.path, hash, sighash, key, pub: schnorr.getPublicKey(key) };
+    }
+    return { n: inp.n, idx, alg: 'ecdsa', type, address: inp.address, amount: inp.amount, path: inp.own.path, hash, sighash, key: priv, pub: pubOf(priv) };
+  });
+  if (!items.length) throw new Error('No input of this wallet left to sign.');
+  return { t, items, analysis };
+}
+
+/** Step 2: the signer nonce R for each item, given the host commitments (32 bytes each). */
+export function antiExfilNonces(prep, commitments) {
+  return prep.items.map((it, i) => (it.alg === 'schnorr' ? schnorrSignerNonce : ecdsaSignerNonce)(it.key, it.hash, commitments[i]));
+}
+
+/**
+ * Step 4: sign every item with its host data. All or nothing, on the prepared copy.
+ * Returns signPsbt's result plus `nonces: [{ n, R, Rfinal }]`.
+ */
+export function signPsbtAntiExfil(prep, commitments, datas) {
+  const { t, items, analysis } = prep;
+  const sigs = items.map((it, i) => {
+    if (it.alg === 'schnorr') {
+      const r = schnorrSignAntiExfil(it.key, it.hash, commitments[i], datas[i]);
+      return { it, r, upd: { tapKeySig: it.sighash === btc.SigHash.DEFAULT ? r.sig : concatB(r.sig, Uint8Array.of(it.sighash)) } };
+    }
+    const r = ecdsaSignAntiExfil(it.key, it.hash, commitments[i], datas[i]);
+    return { it, r, upd: { partialSig: [[it.pub, concatB(r.der, Uint8Array.of(it.sighash))]] } };
+  });
+  for (const { it, upd } of sigs) t.updateInput(it.idx, upd, true);
+  const res = finishSigned(t, analysis, sigs.length);
+  return { ...res, nonces: sigs.map(({ it, r }) => ({ n: it.n, R: r.R, Rfinal: r.Rfinal })) };
+}
+
+const concatB = (a, b) => { const o = new Uint8Array(a.length + b.length); o.set(a); o.set(b, a.length); return o; };
 
 /** JSON view of the PSBT in the spirit of Bitcoin Core's decodepsbt. */
 export function psbtJSON(tx, a) {

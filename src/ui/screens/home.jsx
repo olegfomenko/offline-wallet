@@ -147,7 +147,11 @@ export function Settings() {
       </div>
       <div class="stack" style={{ gap: '8px' }}>
         <span class="caps s12">Tools</span>
-        <div class="card"><Link to="text-qr" t="Text to QR" s="Show any text as a QR code" /></div>
+        <div class="card">
+          <Link to="text-qr" t="Text to QR" s="Show any text as a QR code" />
+          <Link to="hash" t="SHA-256 · SHA-512" s="Hash text, hex or Base64" />
+          <Link to="secp256k1" t="secp256k1 calculator" s="k × P, P + Q, 2P · any point format" />
+        </div>
       </div>
       <div class="stack" style={{ gap: '8px' }}>
         <span class="caps s12">About</span>

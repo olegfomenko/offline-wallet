@@ -8,6 +8,7 @@ import { classify, classifyPayload, psbtQRFrames, base43 } from '../../core/tran
 import { parsePsbt, analyzePsbt, signPsbt, psbtJSON, fmtPct, fmtRate, fmtDate } from '../../core/psbt.js';
 import { base64, hex } from '../../core/util.js';
 import { NETS, TYPES } from '../../core/hd.js';
+import { startTxAntiExfil } from './antiexfil.jsx';
 
 const WALLETS = [
   ['sparrow', 'Sparrow', 'Create the send, then show it as QR for an air-gapped signer. Large ones come as animated BBQr or UR, both work.', 'BBQr or UR', 'UR'],
@@ -319,6 +320,8 @@ export function Review() {
       {err && <span class="note err">{err}</span>}
       <div class="btnrow">
         <button class="btn-secondary bold" onClick={() => { setState({ tx: { source: tx.source } }); go('main'); }}>Reject</button>
+        {canSign && <button class="btn-secondary bold" title="The host adds its own randomness to each nonce, so this signer can’t leak your key through the signatures"
+          onClick={() => { setErr(''); try { startTxAntiExfil(); } catch (e) { setErr('Anti-exfil signing isn’t possible: ' + e.message); } }}>Anti-exfil signing</button>}
         {canSign ? <button class="btn-primary" onClick={sign}>{a.clean ? 'Approve & sign' : 'Sign'}</button> : <button class="btn-primary" disabled>{a.canSign ? 'Confirm the items first' : 'Blocked'}</button>}
       </div>
     </NavShell>

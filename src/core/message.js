@@ -4,6 +4,7 @@
 import { secp256k1, schnorr } from '@noble/curves/secp256k1.js';
 import { concat, sha256d, varint, utf8, taggedHash, randomBytes, equal } from './util.js';
 import { addressOf, decodeAddress, xonly } from './hd.js';
+import { ecdsaSignerNonce, ecdsaSignAntiExfil, schnorrSignerNonce, schnorrSignAntiExfil } from './antiexfil.js';
 
 const PREFIX = utf8.encode('\x18Bitcoin Signed Message:\n');
 
@@ -65,6 +66,23 @@ export function verifyMessageSchnorr(xonlyPub, msgBytes, sig) {
   } catch (e) {
     return { ok: false, why: 'The signature or key is malformed.' };
   }
+}
+
+// ---- anti-exfil message signing (antiexfil.js): same signature formats, host-committed nonce ----
+
+/** Step 2: the signer nonce R for this message (ECDSA: 33 bytes; Schnorr: 32 bytes x-only). */
+export function messageSignerNonce(alg, priv, msgBytes, commitment) {
+  return alg === 'ecdsa' ? ecdsaSignerNonce(priv, messageHash(msgBytes), commitment) : schnorrSignerNonce(priv, bip322Hash(msgBytes), commitment);
+}
+
+/** Step 4: the signature (65-byte BIP-137 or 64-byte BIP-340) and its nonces { sig, R, Rfinal }. */
+export function signMessageAntiExfil(alg, priv, msgBytes, type, commitment, data) {
+  if (alg !== 'ecdsa') return schnorrSignAntiExfil(priv, bip322Hash(msgBytes), commitment, data);
+  const r = ecdsaSignAntiExfil(priv, messageHash(msgBytes), commitment, data);
+  const sig = new Uint8Array(65);
+  sig[0] = HEADER[type] + r.recovery;
+  sig.set(r.compact, 1);
+  return { sig, R: r.R, Rfinal: r.Rfinal };
 }
 
 export { xonly, equal };

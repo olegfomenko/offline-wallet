@@ -15,6 +15,8 @@ const initial = () => ({
   tx: {},            // loaded PSBT, its analysis and signing result
   log: [],           // signed PSBTs and messages (this tab only)
   logPrefs: { keep: true, retOn: false, d: 30, h: 0 },
+  ae: null,          // anti-exfil signing in progress (message or transaction), with its keys
+  sigDone: null,     // a message signature made on the anti-exfil screen, shown on Sign or verify
   sheet: null,
   toast: null,
 });

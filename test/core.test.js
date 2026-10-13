@@ -12,7 +12,9 @@ import { decodeWIF, encodeWIF, parseKeyLine, decryptBIP38, pubOf, keyAddress, lo
 import { makeEntropy, countedBits, neededBits } from '../src/core/entropy.js';
 import { signMessageECDSA, verifyMessageECDSA, signMessageSchnorr, verifyMessageSchnorr } from '../src/core/message.js';
 import { base43, BBQrDecoder, bbqrSplit, classify, MultiPartCollector, psbtQRFrames } from '../src/core/transport.js';
-import { parsePsbt, analyzePsbt, signPsbt, psbtJSON } from '../src/core/psbt.js';
+import { parsePsbt, analyzePsbt, signPsbt, psbtJSON, prepareAntiExfil, antiExfilNonces, signPsbtAntiExfil } from '../src/core/psbt.js';
+import { hostCommitment, hostVerifyECDSA, hostVerifySchnorr } from '../src/core/antiexfil.js';
+import { secp256k1, schnorr } from '@noble/curves/secp256k1.js';
 
 const ABANDON = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'.split(' ');
 const W = walletFromMnemonic(ABANDON, '');
@@ -253,6 +255,51 @@ for (const type of ['wpkh', 'tr', 'pkh', 'shwpkh']) {
     expect(typeof psbtJSON(tx, a)).toBe('string');
   });
 }
+
+// Anti-exfil: the sighash we compute is the one scure-btc-signer signs (its own signature verifies
+// against it), the result finalizes, and every signature passes the host's nonce check.
+function aeCheck(psbtBytes, n) {
+  const tx = parsePsbt(psbtBytes);
+  const a = analyzePsbt(tx, W, { net: 'main' });
+  const prep = prepareAntiExfil(tx, a);
+  expect(prep.items.length).toBe(n);
+  const plain = parsePsbt(signPsbt(tx, a, W).psbt);
+  for (const it of prep.items) {
+    const inp = plain.getInput(it.idx);
+    if (it.alg === 'schnorr') expect(schnorr.verify(inp.tapKeySig.subarray(0, 64), it.hash, it.pub)).toBe(true);
+    else expect(secp256k1.verify(secp256k1.Signature.fromBytes(inp.partialSig[0][1].subarray(0, -1), 'der').toBytes('compact'), it.hash, it.pub, { prehash: false })).toBe(true);
+  }
+  const datas = prep.items.map((_, i) => utf8.encode('host data ' + i));
+  const coms = datas.map(hostCommitment);
+  const Rs = antiExfilNonces(prep, coms);
+  const r = signPsbtAntiExfil(prep, coms, datas);
+  expect(r.final).toBe(true);
+  const out = parsePsbt(r.psbt);
+  prep.items.forEach((it, i) => {
+    const inp = out.getInput(it.idx);
+    if (it.alg === 'schnorr') expect(hostVerifySchnorr(inp.tapKeySig.subarray(0, 64), it.hash, it.pub, Rs[i], datas[i])).toBe(true);
+    else expect(hostVerifyECDSA(secp256k1.Signature.fromBytes(inp.partialSig[0][1].subarray(0, -1), 'der').toBytes('compact'), it.hash, it.pub, Rs[i], datas[i])).toBe(true);
+    expect(hex.encode(r.nonces[i].R)).toBe(hex.encode(Rs[i]));
+  });
+  // Wrong data for one input: nothing is signed.
+  const prep2 = prepareAntiExfil(tx, a);
+  const bad = datas.slice(); bad[n - 1] = utf8.encode('not what was committed');
+  expect(() => signPsbtAntiExfil(prep2, coms, bad)).toThrow(/doesn’t match/);
+  expect(prep2.t.getInput(prep2.items[0].idx).partialSig || prep2.t.getInput(prep2.items[0].idx).tapKeySig).toBe(undefined);
+}
+for (const type of ['wpkh', 'tr', 'pkh', 'shwpkh']) {
+  test('PSBT anti-exfil signing: ' + type, () => aeCheck(buildPsbt({ type }), 1));
+}
+test('PSBT anti-exfil signing: two inputs, native SegWit and Taproot, one nonce each', () => {
+  const tx = parsePsbt(buildPsbt({ type: 'wpkh' }));
+  const two = parsePsbt(buildPsbt({ type: 'tr' }));
+  const ti = two.getInput(0);
+  delete ti.nonWitnessUtxo;
+  tx.addInput(ti);
+  // The extra 10M sats input goes to fee in this sketch; raise the external output so it doesn't.
+  tx.updateOutput(0, { amount: 1500000n + 10000000n - 2571n });
+  aeCheck(tx.toPSBT(), 2);
+});
 
 test('PSBT warnings: missing prev tx, SIGHASH_NONE, high fee, self output, date locktime', () => {
   let a = analyzePsbt(parsePsbt(buildPsbt({ full: false })), W);

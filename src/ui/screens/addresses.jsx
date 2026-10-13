@@ -1,7 +1,7 @@
 // Addresses: type, account, path, xpub/descriptor export, address list, detail, private keys,
 // path editor, and message signing.
 import { h, Fragment } from 'preact';
-import { useState, useMemo } from 'preact/hooks';
+import { useState, useMemo, useEffect } from 'preact/hooks';
 import { go } from '../router.js';
 import { getState, setState, patch, useStore, addLog } from '../store.js';
 import { NavShell, TitleRow, Seg, Chips, UTabs, Spacer, OutField, ExportBtn, PrivChip, InField, I, Card, Addr, shortAddr, fmtTime } from '../kit.jsx';
@@ -11,6 +11,7 @@ import { encodeWIF, pubOf, ELECTRUM_PREFIX } from '../../core/keys.js';
 import { signMessageECDSA, verifyMessageECDSA, signMessageSchnorr, verifyMessageSchnorr } from '../../core/message.js';
 import { hex, base64, utf8, hash160, isHex } from '../../core/util.js';
 import * as btc from '@scure/btc-signer';
+import { startMessageAntiExfil } from './antiexfil.jsx';
 
 const TYPE_HINT = { wpkh: 'P2WPKH · BIP84', tr: 'P2TR · BIP86', shwpkh: 'P2SH-P2WPKH · BIP49', pkh: 'P2PKH · BIP44' };
 
@@ -402,12 +403,12 @@ export function PrivateKey() {
 }
 
 // ---------- message signing ----------
-function toBytes(raw, fmt) {
+export function toBytes(raw, fmt) {
   if (fmt === 'text') return utf8.encode(raw);
   if (fmt === 'hex') { const s = raw.replace(/\s+/g, ''); return isHex(s) ? hex.decode(s) : null; }
   try { return base64.decode(raw); } catch (e) { return null; }
 }
-function fromBytes(b, fmt) {
+export function fromBytes(b, fmt) {
   if (fmt === 'text') { try { return new TextDecoder('utf-8', { fatal: true }).decode(b); } catch (e) { return null; } }
   if (fmt === 'hex') return hex.encode(b);
   return base64.encode(b);
@@ -420,8 +421,12 @@ export function SignVerify() {
   const net = st.settings.net;
   const sel = st.addrSel;
   const pre = st.sigPrefill;
-  const [S, set0] = useState(() => ({ tab: pre ? 'verify' : 'sign', alg: pre ? pre.alg : 'ecdsa', mfmt: pre ? pre.mfmt : 'text', msg: pre ? pre.msg : '', msgErr: '', sig: null, sfmt: 'b64', vfmt: pre ? pre.vfmt : 'b64', vsig: pre ? pre.sig : '', who: pre ? pre.who : null, res: null }));
-  const set = (p) => set0((s) => ({ ...s, ...p }));
+  const done = st.sigDone; // back from anti-exfil signing with its signature
+  const [S, set0] = useState(() => (done
+    ? { tab: 'sign', alg: done.alg, mfmt: done.mfmt, msg: done.msg, msgErr: '', sig: done.sig, ae: true, sfmt: 'b64', vfmt: 'b64', vsig: '', who: null, res: null }
+    : { tab: pre ? 'verify' : 'sign', alg: pre ? pre.alg : 'ecdsa', mfmt: pre ? pre.mfmt : 'text', msg: pre ? pre.msg : '', msgErr: '', sig: null, ae: false, sfmt: 'b64', vfmt: pre ? pre.vfmt : 'b64', vsig: pre ? pre.sig : '', who: pre ? pre.who : null, res: null }));
+  useEffect(() => { if (done) setState({ sigDone: null }); }, []);
+  const set = (p) => set0((s) => ({ ...s, ...(('sig' in p) && !('ae' in p) ? { ae: false } : {}), ...p }));
   if (!sel) { go('addresses'); return null; }
   const R = resolveSel(w, sel, net);
   const xpk = hex.encode(xonly(R.pub));
@@ -441,7 +446,7 @@ export function SignVerify() {
     if (msgBad) return;
     if (isSign) {
       const sig = S.alg === 'ecdsa' ? signMessageECDSA(R.priv, bytes, R.type) : signMessageSchnorr(R.priv, bytes);
-      set({ sig });
+      set({ sig, ae: false });
       addLog({ kind: 'msg', main: S.mfmt === 'text' ? S.msg.slice(0, 120) : S.mfmt + ' message · ' + bytes.length + ' bytes', address: R.address, alg: S.alg, prefill: { alg: S.alg, mfmt: S.mfmt, msg: S.msg, vfmt: 'b64', sig: base64.encode(sig), who: S.alg === 'ecdsa' ? R.address : xpk }, sel });
     } else {
       const sig = sigDecode(S.vsig, S.vfmt);
@@ -484,14 +489,21 @@ export function SignVerify() {
         </div>
         <div>
           {isSign && (S.sig ? (
-            <OutField label="Signature" value={sigText} extra={null} spec={{ title: (S.alg === 'ecdsa' ? 'ECDSA' : 'Schnorr') + ' signature · ' + (S.sfmt === 'hex' ? 'hex' : 'base64'), value: sigText, file: 'signature-' + S.alg + (S.sfmt === 'hex' ? '.hex' : '.txt') }} />
+            <OutField label="Signature" value={sigText} extra={null} note={S.ae ? 'Signed with anti-exfil: its nonce is the final nonce from the host’s data. The host checks it with R and its data.' : null} spec={{ title: (S.alg === 'ecdsa' ? 'ECDSA' : 'Schnorr') + ' signature · ' + (S.sfmt === 'hex' ? 'hex' : 'base64'), value: sigText, file: 'signature-' + S.alg + (S.sfmt === 'hex' ? '.hex' : '.txt') }} />
           ) : <div class="stack"><span class="flabel">Signature</span><div class="infoline">Click Sign message. The signature shows here, ready to export as text, QR or a file.</div></div>)}
           {isSign && S.sig && <div style={{ marginTop: '-6px' }}><Chips label="Signature format" items={[['hex', 'Hex'], ['b64', 'Base64']]} value={S.sfmt} onChange={(k) => set({ sfmt: k })} /></div>}
           {isSign && S.alg === 'schnorr' && <OutField label="Your public key (x-only)" value={xpk} spec={{ title: 'Public key (x-only)', value: xpk, file: 'public-key-xonly.txt' }} note="Send it along with the signature: Schnorr verifiers need it." />}
           <span class="note">{compat}</span>
         </div>
       </div>
-      <button class={msgBad ? 'btn-primary' : 'btn-primary'} disabled={msgBad} onClick={run}>{isSign ? (S.sig ? 'Sign again' : 'Sign message') : 'Verify'}</button>
+      {isSign ? (
+        <div class="btnrow">
+          <button class="btn-primary" disabled={msgBad} onClick={run}>{S.sig ? 'Sign again' : 'Sign message'}</button>
+          <button class="btn-secondary bold" disabled={msgBad} title="The host adds its own randomness to the nonce, so this signer can’t leak your key through the signature"
+            onClick={() => startMessageAntiExfil({ alg: S.alg, priv: R.priv, type: R.type, bytes, mfmt: S.mfmt, msg: S.msg, address: R.address, xpk, sel,
+              label: sel.keyIdx !== undefined ? R.key.label || 'Key' : (sel.branch ? 'Change' : 'Receive') + ' #' + sel.i })}>Anti-exfil signing</button>
+        </div>
+      ) : <button class="btn-primary" disabled={msgBad} onClick={run}>Verify</button>}
     </NavShell>
   );
 }

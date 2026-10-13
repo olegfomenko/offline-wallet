@@ -91,6 +91,7 @@ h1.h28 { font-size: 28px; }
 .note { font-size: 12px; line-height: 1.45; color: var(--muted); }
 .note.err { color: var(--danger); }
 .note.ok { color: var(--accent); }
+.note.warn { color: var(--warn); }
 .small { font-size: 13px; line-height: 1.5; color: var(--muted); }
 .badge-opt { align-self: flex-start; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); padding: 3px 8px; }
 .tag { font-size: 11px; font-weight: 700; padding: 1px 6px; border: 1px solid currentColor; letter-spacing: 0.02em; }
@@ -199,6 +200,18 @@ label.wordcell input { flex: 1 1 auto; min-width: 0; width: 100%; height: 32px; 
 .warnline svg { flex-shrink: 0; color: var(--danger); }
 .infoline { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line2); background: var(--surface); font-size: 13px; line-height: 1.5; color: var(--muted); }
 .infoline svg { flex-shrink: 0; color: var(--text); }
+/* anti-exfil signing */
+/* secp256k1 calculator */
+.gbtn { height: 30px; padding: 0 10px; border: 1px solid var(--primary); background: var(--primary); color: var(--on-primary); font: 600 12px var(--sans); cursor: pointer; }
+.gbtn.on { border-color: var(--line2); background: var(--line); color: var(--muted); }
+.gmark { color: var(--accent); font-family: var(--sans); font-weight: 600; }
+.aesum { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.aesum b { color: var(--text); font-weight: 400; }
+.h20 { font-size: 20px; font-weight: 700; }
+.aewarn { display: flex; gap: 10px; padding: 12px 14px; border: 1px solid var(--muted); font-size: 13px; line-height: 1.5; }
+.aewarn b { color: var(--muted); }
+.aewarn.warn { border-color: var(--warn); }
+.aewarn.warn b { color: var(--warn); }
 .okbanner { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--accent); font-size: 15px; }
 .okbanner svg { color: var(--accent); flex-shrink: 0; }
 .status { font-size: 12px; line-height: 1.45; color: var(--text); }

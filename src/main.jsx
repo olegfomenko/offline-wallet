@@ -12,6 +12,7 @@ import * as A from './ui/screens/addresses.jsx';
 import * as S from './ui/screens/signing.jsx';
 import * as L from './ui/screens/logs.jsx';
 import * as T from './ui/screens/tools.jsx';
+import * as AE from './ui/screens/antiexfil.jsx';
 
 watchInjections('app');
 
@@ -22,9 +23,9 @@ const OPEN = {
   restore: R.RestoreSeed, 'custom-seed': R.CustomSeed, 'restore-key': R.RestoreKey, 'check-master': R.CheckMasterKey, 'check-keys': R.CheckSingleKeys,
 };
 const WALLET = {
-  main: H.Main, seed: H.Seed, settings: H.Settings, wordlist: H.WordList, lastword: H.LastWord, 'check-address': H.CheckAddress, 'check-passphrase': T.CheckPassphrase, 'text-qr': T.TextQr,
+  main: H.Main, seed: H.Seed, settings: H.Settings, wordlist: H.WordList, lastword: H.LastWord, 'check-address': H.CheckAddress, 'check-passphrase': T.CheckPassphrase, 'text-qr': T.TextQr, hash: T.HashTool, secp256k1: T.Secp256k1Tool,
   addresses: A.Addresses, 'address-help': A.AddressHelp, 'edit-path': A.EditPath, address: A.AddressDetail, 'private-key': A.PrivateKey, 'sign-verify': A.SignVerify,
-  source: S.SourceWallet, load: S.LoadTransaction, notpsbt: S.NotAPsbt, review: S.Review, 'signed-export': S.SignedExport, 'psbt-details': S.PsbtDetails,
+  source: S.SourceWallet, load: S.LoadTransaction, notpsbt: S.NotAPsbt, review: S.Review, 'signed-export': S.SignedExport, 'psbt-details': S.PsbtDetails, 'anti-exfil': AE.AntiExfil, 'anti-exfil-msg': AE.AntiExfil,
   signed: L.Signed,
 };
 

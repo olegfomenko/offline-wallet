@@ -1,14 +1,15 @@
-// Settings tools: Check passphrase and Text to QR.
+// Settings tools: Check passphrase, Text to QR, SHA-256 · SHA-512 and the secp256k1 calculator.
 import { h, Fragment } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
 import { useStore } from '../store.js';
-import { NavShell, TitleRow, Seg, InField, ImportBtn, I } from '../kit.jsx';
+import { NavShell, TitleRow, Seg, Chips, InField, ImportBtn, ExportBtn, I } from '../kit.jsx';
 import { Keyboard, useKbd } from '../Keyboard.jsx';
 import { QR } from '../sheet.jsx';
 import { useFingerprint } from './create.jsx';
 import { qrMatrix, qrSvgPath, qrPngBlob, download } from '../io.js';
 import { textQRFrames } from '../../core/transport.js';
-import { utf8 } from '../../core/util.js';
+import { utf8, hex } from '../../core/util.js';
+import { digest, decodeBytes, encodeBytes, parseNum, formatNum, modN, N, G, parsePoint, encodePoint, ecOp, yOdd } from '../../core/calc.js';
 
 // ---------- Check passphrase ----------
 export function CheckPassphrase() {
@@ -136,6 +137,151 @@ export function TextQr() {
               {msg && <span role="status" class="note ok">{msg}</span>}
             </>
           ) : <div class="qrempty">The QR appears here</div>}
+        </div>
+      </div>
+    </NavShell>
+  );
+}
+
+// ---------- shared bits for the calculators ----------
+const asText = (b) => { try { return new TextDecoder('utf-8', { fatal: true }).decode(b); } catch (e) { return null; } };
+function bytesIn(s, fmt) {
+  if (fmt === 'text') return utf8.encode(s);
+  return s.trim() === '' ? new Uint8Array(0) : decodeBytes(s, fmt);
+}
+function bytesOut(b, fmt) { return fmt === 'text' ? asText(b) : encodeBytes(b, fmt); }
+
+/** An output value with its label, format chips and an export button (none until there is a value). */
+function CalcOut({ label, meta, value, empty, chips, spec, note }) {
+  return (
+    <div class="field">
+      <div class="fhead"><span class="flabel">{label} {meta && <span class="note">{meta}</span>}</span><span>{chips}</span></div>
+      <div class="fbody">
+        <div class="valbox" style={value ? null : { color: 'var(--dim)' }}>{value || empty}</div>
+        {value && <ExportBtn spec={{ ...spec, value }} />}
+      </div>
+      {note && <span class="note">{note}</span>}
+    </div>
+  );
+}
+
+// ---------- SHA-256 · SHA-512 ----------
+export function HashTool() {
+  const [S, set0] = useState({ alg: 'sha256', inFmt: 'text', outFmt: 'hex', input: 'abc', err: '' });
+  const set = (p) => set0((s) => ({ ...s, err: '', ...p }));
+  const bytes = bytesIn(S.input, S.inFmt);
+  const d = bytes ? digest(S.alg, bytes) : null;
+  const name = S.alg === 'sha512' ? 'SHA-512' : 'SHA-256';
+  const switchIn = (k) => {
+    if (k === S.inFmt) return;
+    if (!bytes) return set({ inFmt: k });
+    const out = bytesOut(bytes, k);
+    if (out === null) return set({ err: 'These bytes aren’t readable text. Keep them as hex or Base64.' });
+    set({ inFmt: k, input: out });
+  };
+  // A file brings raw bytes: keep the format if it can show them, else switch to hex.
+  const fromImport = (v) => {
+    if (!(v instanceof Uint8Array)) return set({ input: String(v) });
+    const out = bytesOut(v, S.inFmt);
+    out === null ? set({ inFmt: 'hex', input: hex.encode(v) }) : set({ input: out });
+  };
+  const encName = { text: 'text', hex: 'hex', b64: 'Base64' }[S.inFmt];
+  const out = d ? encodeBytes(d, S.outFmt) : '';
+  return (
+    <NavShell max={1120} gap={16}>
+      <TitleRow back="settings" title="SHA-256 · SHA-512" />
+      <p class="lead">Hash any text or bytes. Computed on this computer as you type.</p>
+      <div class="cols2">
+        <div>
+          <div class="stack"><span id="h-alg" class="small">Algorithm</span><Seg items={[['sha256', 'SHA-256'], ['sha512', 'SHA-512']]} value={S.alg} labelledBy="h-alg" onChange={(v) => set({ alg: v })} /></div>
+          <div class="stack"><span id="h-in" class="small">Input format</span><Seg items={[['text', 'Text'], ['hex', 'Hex'], ['b64', 'Base64']]} value={S.inFmt} labelledBy="h-in" onChange={switchIn} /></div>
+          <InField id="h-input" label="Input" textarea rows={6} value={S.input} onInput={(v) => set({ input: v })}
+            right={bytes && <span class="note">{bytes.length + (bytes.length === 1 ? ' byte' : ' bytes')}</span>}
+            placeholder={S.inFmt === 'text' ? 'Type or paste text' : S.inFmt === 'hex' ? 'Hex bytes' : 'Base64'} bad={!bytes}
+            note={S.err || (bytes ? (S.inFmt === 'text' ? 'Hashed as UTF-8 bytes, exactly as typed: spaces and line breaks count.' : 'Hashed as raw bytes.') : 'Not valid ' + encName + '.')}
+            noteCls={S.err || !bytes ? 'err' : ''}
+            spec={{ title: 'Input to hash', binary: true, onValue: fromImport }} />
+        </div>
+        <div>
+          <div class="stack"><span id="h-out" class="small">Output format</span><Seg items={[['hex', 'Hex'], ['b64', 'Base64']]} value={S.outFmt} labelledBy="h-out" onChange={(v) => set({ outFmt: v })} /></div>
+          <CalcOut label={name} meta={d ? d.length + ' bytes' : ''} value={out} empty="Fix the input first" spec={{ title: name, file: S.alg + '.txt' }}
+            note={S.alg === 'sha512' ? 'Used by BIP32 (as HMAC) and BIP39 (as PBKDF2).' : 'Bitcoin uses it twice (SHA256d) for txids and block hashes.'} />
+        </div>
+      </div>
+    </NavShell>
+  );
+}
+
+// ---------- secp256k1 calculator ----------
+const PT_FMT = { comp: 'compressed · 33 bytes', xonly: 'x-only · 32 bytes', uncomp: 'uncompressed · 65 bytes' };
+
+function PointIn({ id, label, f, onChange }) {
+  const r = f.g ? { pt: G } : f.v.trim() === '' ? { err: '' } : parsePoint(decodeBytes(f.v, f.enc));
+  const reenc = (k) => { const b = f.v.trim() === '' ? null : decodeBytes(f.v, f.enc); onChange({ ...f, enc: k, v: b ? encodeBytes(b, k) : f.v }); };
+  const right = (
+    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <Chips label={label + ' format'} items={[['hex', 'Hex'], ['b64', 'Base64']]} value={f.enc} onChange={reenc} />
+      <button type="button" class={'gbtn' + (f.g ? ' on' : '')} aria-pressed={f.g ? 'true' : 'false'} title="Use the generator point G" onClick={() => onChange({ ...f, g: !f.g })}>{f.g ? 'Using G ✓' : 'Use G'}</button>
+    </span>
+  );
+  const meta = r.pt && !f.g ? ' · ' + r.kind : '';
+  if (f.g) {
+    return (
+      <div class="field">
+        <div class="fhead"><span class="flabel">{label}</span><span>{right}</span></div>
+        <div class="fbody"><div class="valbox"><b class="gmark">G</b> · {encodeBytes(encodePoint(G, 'comp'), f.enc)}</div></div>
+        <span class="note">The secp256k1 generator, shown compressed.</span>
+      </div>
+    );
+  }
+  return (
+    <InField id={id} label={label + meta} textarea rows={3} value={f.v} onInput={(v) => onChange({ ...f, v })} right={right} bad={!!r.err}
+      placeholder={f.enc === 'hex' ? '02…, 03…, 04… or 32-byte x-only' : 'Base64 of a 33, 65 or 32-byte point'}
+      note={r.err === '' ? 'Any format: compressed, uncompressed or x-only (taken with even y).' : r.err ? r.err : '✓ On the curve'} noteCls={r.err === '' ? '' : r.err ? 'err' : 'ok'}
+      spec={{ title: label, onValue: (v) => onChange({ ...f, v: typeof v === 'string' ? v.trim() : new TextDecoder().decode(v).trim() }) }} />
+  );
+}
+const pointOf = (f) => (f.g ? G : f.v.trim() === '' ? null : parsePoint(decodeBytes(f.v, f.enc)).pt || null);
+
+export function Secp256k1Tool() {
+  const [S, set0] = useState({ op: 'mul', fmt: 'comp', kEnc: 'dec', k: '3', rEnc: 'hex', p: { g: true, v: '', enc: 'hex' }, q: { g: false, v: '02c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5', enc: 'hex' } });
+  const set = (p) => set0((s) => ({ ...s, ...p }));
+  const kv = parseNum(S.k, S.kEnc);
+  const kRed = kv === null ? null : modN(kv);
+  const kOk = kRed !== null && kRed !== 0n;
+  const P = pointOf(S.p), Q = pointOf(S.q);
+  const ready = S.op === 'mul' ? kOk && !!P : S.op === 'add' ? !!P && !!Q : !!P;
+  const res = ready ? ecOp(S.op, { k: kRed, P, Q }) : null;
+  const what = { mul: 'k × P', add: 'P + Q', dbl: '2P' }[S.op];
+  const rv = res ? encodeBytes(encodePoint(res, S.fmt), S.rEnc) : '';
+  const kNote = S.k.trim() === '' ? 'Any integer. Negative values and values ≥ n are taken mod n (−1 means n−1).'
+    : kv === null ? 'Not a valid ' + { dec: 'decimal number', hex: 'hex number', b64: 'Base64 value (no sign)' }[S.kEnc] + '.'
+      : !kOk ? 'Zero mod n gives no point. Use any other value.'
+        : '✓ Valid scalar' + (kv < 0n || kv >= N ? ' · taken mod n' : '') + (S.kEnc === 'dec' ? ' · 0x' + kRed.toString(16) : ' · ' + (kRed.toString(10).length > 24 ? kRed.toString(10).slice(0, 24) + '…' : kRed.toString(10)));
+  const kField = (
+    <InField id="ec-k" label="Scalar k" textarea rows={2} value={S.k} onInput={(v) => set({ k: v })} bad={S.k.trim() !== '' && !kOk}
+      right={<Chips label="Scalar k format" items={[['dec', 'Dec'], ['hex', 'Hex'], ['b64', 'Base64']]} value={S.kEnc} onChange={(k) => set({ kEnc: k, k: kv !== null ? formatNum(kv, k) : S.k })} />}
+      placeholder={{ dec: 'A number, may be negative (e.g. -1)', hex: 'Hex, may start with - or 0x', b64: 'Base64, big-endian' }[S.kEnc]}
+      note={kNote} noteCls={S.k.trim() === '' ? '' : kOk ? 'ok' : 'err'}
+      spec={{ title: 'Scalar k', onValue: (v) => set({ k: typeof v === 'string' ? v.trim() : new TextDecoder().decode(v).trim() }) }} />
+  );
+  const pIn = <PointIn id="ec-p" label="Point P" f={S.p} onChange={(p) => set({ p })} />;
+  const qIn = <PointIn id="ec-q" label="Point Q" f={S.q} onChange={(q) => set({ q })} />;
+  return (
+    <NavShell max={1120} gap={16}>
+      <TitleRow back="settings" title="secp256k1 calculator" />
+      <p class="lead">Point arithmetic on the Bitcoin curve: multiply a point by a scalar, add two points, or double one. Use it to check keys, nonces and tweaks by hand.</p>
+      <div class="cols2">
+        <div>
+          <div class="stack"><span id="ec-op" class="small">Operation</span><Seg items={[['mul', 'k × P'], ['add', 'P + Q'], ['dbl', '2P']]} value={S.op} labelledBy="ec-op" onChange={(v) => set({ op: v })} /></div>
+          {S.op === 'mul' ? <>{kField}{pIn}</> : S.op === 'add' ? <>{pIn}{qIn}</> : pIn}
+        </div>
+        <div>
+          <div class="stack"><span id="ec-fmt" class="small">Result format</span><Seg items={[['comp', 'Compressed'], ['xonly', 'x-only'], ['uncomp', 'Uncompressed']]} value={S.fmt} labelledBy="ec-fmt" onChange={(v) => set({ fmt: v })} /></div>
+          <CalcOut label={'Result · ' + what} meta={res ? '· ' + PT_FMT[S.fmt] : ''} value={rv} empty={ready ? 'Point at infinity (no encoding)' : 'Fill in the inputs'}
+            chips={<Chips label="Result format" items={[['hex', 'Hex'], ['b64', 'Base64']]} value={S.rEnc} onChange={(v) => set({ rEnc: v })} />}
+            spec={{ title: 'Result · ' + what, file: 'point.txt' }}
+            note={!res ? (ready ? 'The two points cancel out, or P has y = 0.' : '') : S.fmt === 'xonly' ? 'x-only drops the y sign. Here y is ' + (yOdd(res) ? 'odd, so BIP340 reads it as the negated point.' : 'even.') : 'y is ' + (yOdd(res) ? 'odd.' : 'even.')} />
         </div>
       </div>
     </NavShell>

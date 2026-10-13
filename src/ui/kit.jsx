@@ -48,11 +48,11 @@ export function FlowShell({ max = 600, gap = 20, children }) {
 
 const NAV = [
   ['main', 'Home', I.IHome, ['main']],
-  ['source', 'Sign transaction', I.IScan, ['source', 'load', 'notpsbt', 'review', 'signed-export', 'psbt-details']],
-  ['addresses', 'Addresses', I.IList, ['addresses', 'address-help', 'edit-path', 'address', 'private-key', 'sign-verify']],
+  ['source', 'Sign transaction', I.IScan, ['source', 'load', 'notpsbt', 'review', 'anti-exfil', 'signed-export', 'psbt-details']],
+  ['addresses', 'Addresses', I.IList, ['addresses', 'address-help', 'edit-path', 'address', 'private-key', 'sign-verify', 'anti-exfil-msg']],
   ['signed', 'Signed', I.ISigned, ['signed']],
   ['seed', 'Seed', I.ILock, ['seed']],
-  ['settings', 'Settings', I.IGear, ['settings', 'wordlist', 'lastword', 'check-address', 'check-passphrase', 'text-qr']],
+  ['settings', 'Settings', I.IGear, ['settings', 'wordlist', 'lastword', 'check-address', 'check-passphrase', 'text-qr', 'hash', 'secp256k1']],
 ];
 
 export function walletLabel(w) {
@@ -189,11 +189,11 @@ export function ImportBtn({ spec }) {
 }
 
 /** Output field: label, value box, export button. Private values show "Hidden". */
-export function OutField({ label, value, spec, note, noteCls = '', priv, children, extra }) {
+export function OutField({ label, value, spec, note, noteCls = '', priv, children, extra, right }) {
   const s = spec || { title: label, value, priv };
   return (
     <div class="field">
-      <div class="fhead"><span class="flabel">{label}{priv && <PrivChip />}{extra}</span><span /></div>
+      <div class="fhead"><span class="flabel">{label}{priv && <PrivChip />}{extra}</span><span>{right}</span></div>
       <div class="fbody">
         {priv ? <div class="valbox hiddenv"><span>••••••••••••</span><small>Hidden</small></div> : <div class="valbox">{children || value}</div>}
         <ExportBtn spec={{ ...s, priv: !!priv }} />
