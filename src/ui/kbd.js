@@ -1,6 +1,10 @@
 // On-screen keyboard: layouts and editing rules, with no DOM, so node --test can check them.
 // The panel (Keyboard.jsx) keeps the mode, shuffle and Show/Hide state; the typed value stays in the
 // screen's own state and goes through these functions.
+import { randomInt } from '../core/util.js';
+
+/** Uniform integer in [0, n) from the browser's CSPRNG (rejection sampling, no modulo bias). */
+export { randomInt as cryptoRandomInt };
 
 /** Seed words: letters only. */
 export const SEED_ROWS = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
@@ -18,19 +22,8 @@ export const isUpper = (mode) => mode === 'ABC' || mode === 'ACC';
 
 const split = (rows) => rows.map((r) => Array.from(r));
 
-/** Uniform integer in [0, n) from the browser's CSPRNG (rejection sampling, no modulo bias). */
-export function cryptoRandomInt(n) {
-  if (!(n > 0) || n > 0x100000000) throw new Error('bad range');
-  const limit = Math.floor(0x100000000 / n) * n;
-  const buf = new Uint32Array(1);
-  for (;;) {
-    crypto.getRandomValues(buf);
-    if (buf[0] < limit) return buf[0] % n;
-  }
-}
-
 /** Fisher–Yates over all keys, then poured back into rows of the same lengths. */
-export function shuffleRows(rows, randInt = cryptoRandomInt) {
+export function shuffleRows(rows, randInt = randomInt) {
   const all = [].concat(...rows);
   for (let i = all.length - 1; i > 0; i--) {
     const j = randInt(i + 1);
@@ -44,7 +37,7 @@ export function shuffleRows(rows, randInt = cryptoRandomInt) {
  * Key order for every key set of a layout. Shuffled ones get a fresh order each call; lower and
  * upper case share one order so ⇧ doesn't move the keys.
  */
-export function makeOrders(layout, shuffled, randInt = cryptoRandomInt) {
+export function makeOrders(layout, shuffled, randInt = randomInt) {
   const sets = layout === 'seed' ? { abc: SEED_ROWS } : TEXT_ROWS;
   const out = {};
   for (const k of Object.keys(sets)) out[k] = shuffled ? shuffleRows(split(sets[k]), randInt) : split(sets[k]);

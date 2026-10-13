@@ -3,11 +3,11 @@ import { h, Fragment } from 'preact';
 import { useState, useEffect, useMemo } from 'preact/hooks';
 import { go } from '../router.js';
 import { getState, setState, patch, useStore, addLog, signNetOf } from '../store.js';
-import { NavShell, TitleRow, Seg, UTabs, Spacer, OutField, ExportBtn, InField, I, Card, Addr, fmtAmt, unitName, shortAddr, KV, Section } from '../kit.jsx';
-import { classify, classifyPayload, psbtQRFrames, base43 } from '../../core/transport.js';
+import { NavShell, TitleRow, Seg, Spacer, OutField, ExportBtn, InField, I, Card, Addr, fmtAmt, shortAddr, KV, Section } from '../kit.jsx';
+import { classify, classifyPayload, psbtQRFrames } from '../../core/transport.js';
 import { parsePsbt, analyzePsbt, signPsbt, psbtJSON, fmtPct, fmtRate, fmtDate } from '../../core/psbt.js';
-import { base64, hex } from '../../core/util.js';
-import { NETS, TYPES } from '../../core/hd.js';
+import { base64 } from '../../core/util.js';
+import { NETS } from '../../core/hd.js';
 import { startTxAntiExfil } from './antiexfil.jsx';
 
 const WALLETS = [
@@ -40,7 +40,7 @@ export function SourceWallet() {
       <span class="small" style={{ marginTop: '-8px' }}>So we can tell you where to find it there, and send the signed result back in a form it reads.</span>
       <div class="stack" style={{ gap: '8px' }}>
         {WALLETS.map(([id, name, how, fmt]) => (
-          <button class={'opt' + (cur === id ? ' on' : '')} aria-pressed={cur === id ? 'true' : 'false'} onClick={() => patch('tx', { source: id })}>
+          <button key={id} class={'opt' + (cur === id ? ' on' : '')} aria-pressed={cur === id ? 'true' : 'false'} onClick={() => patch('tx', { source: id })}>
             <span class="t"><b>{name}</b><span>{fmt}</span></span>
             {cur === id && <span class="how">{how}</span>}
           </button>
@@ -116,7 +116,7 @@ export function LoadTransaction() {
         <button class="toggleline" style={{ background: 'none', border: 'none', color: 'var(--text)', width: '100%', fontFamily: 'var(--sans)' }} aria-expanded={manual ? 'true' : 'false'} onClick={() => setManual(!manual)}><span>Accepted formats</span><span>{manual ? '−' : '+'}</span></button>
         {manual && (
           <>
-            {FORMATS.map(([n, ws]) => <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', padding: '9px 14px', borderTop: '1px solid var(--line)' }}><span class="mono" style={{ fontSize: '13px', minWidth: '110px' }}>{n}</span><span class="small">{ws}</span></div>)}
+            {FORMATS.map(([n, ws]) => <div key={n} style={{ display: 'flex', alignItems: 'baseline', gap: '10px', padding: '9px 14px', borderTop: '1px solid var(--line)' }}><span class="mono" style={{ fontSize: '13px', minWidth: '110px' }}>{n}</span><span class="small">{ws}</span></div>)}
             <span class="note" style={{ padding: '9px 14px', borderTop: '1px solid var(--line)' }}>The format is detected automatically. Animated codes (UR, BBQr) need every part, so scan them with the webcam rather than from a picture.</span>
           </>
         )}
@@ -171,7 +171,7 @@ export function NotAPsbt() {
   );
 }
 
-function OutputRow({ o, unit, net }) {
+function OutputRow({ o, unit }) {
   const kindLabel = { external: 'External', change: 'Change', mine: 'Yours · not change', unusual: 'Yours · unusual path', data: 'Data' }[o.kind];
   const sub = o.kind === 'external' ? 'Not in this wallet.' : o.kind === 'change' ? 'Verified · ' + (o.own.path || o.own.label || 'single key') : o.kind === 'mine' ? 'Receive #' + o.own.index + ' · ' + o.own.path : o.kind === 'unusual' ? 'Derived from this wallet · ' + o.own.path : null;
   return (
@@ -211,7 +211,7 @@ function Group({ title, items, mark, col, check, acks, onToggle }) {
     <div class="issuegrp">
       <span class="caps s12">{title}</span>
       <div class="card">{items.map((x) => (
-        <label class="issue" style={{ cursor: check ? 'pointer' : 'default' }}>
+        <label key={x.id || x.title} class="issue" style={{ cursor: check ? 'pointer' : 'default' }}>
           {check ? <input type="checkbox" checked={!!acks[x.id]} onChange={() => onToggle(x.id)} /> : <span class="mark" style={{ color: col }}>{mark}</span>}
           <span><b>{x.title}</b><span class="txt">{x.body}</span></span>
         </label>
@@ -261,7 +261,7 @@ export function Review() {
             {a.fee !== null && <span class="note">plus {fmtAmt(a.fee, unit)} fee{a.feePct !== null ? ' · ' + fmtPct(a.feePct) + ' of the amount' : ''}</span>}
           </div>
           <Section title="Outputs" right={a.outputs.length + ' output' + (a.outputs.length > 1 ? 's' : '')}>
-            <Card>{a.outputs.map((o) => <OutputRow o={o} unit={unit} net={a.net} />)}</Card>
+            <Card>{a.outputs.map((o) => <OutputRow key={o.n} o={o} unit={unit} />)}</Card>
           </Section>
           <Section title="Fee">
             <Card>
@@ -273,7 +273,7 @@ export function Review() {
           {!a.clean && (
             <Section title="Inputs" right={a.inputs.length + ' input' + (a.inputs.length > 1 ? 's' : '')}>
               <Card>{a.inputs.map((x) => (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderTop: x.n > 1 ? '1px solid var(--line)' : 'none' }}>
+                <div key={x.n} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderTop: x.n > 1 ? '1px solid var(--line)' : 'none' }}>
                   <span style={{ display: 'flex', flexDirection: 'column', gap: '3px', flex: '1 1 auto', minWidth: 0 }}>
                     <span style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}><span class="muted">Input {x.n} · outpoint</span><span class="mono">{x.amount === null ? '?' : fmtAmt(x.amount, unit, false)}</span></span>
                     <span class="mono" style={{ fontSize: '12px', wordBreak: 'break-all' }}>{x.outpoint}</span>
@@ -292,13 +292,13 @@ export function Review() {
             <>
               <Section title="Before you sign">
                 <Card>{a.notes.map((n) => (
-                  <div class="check"><span class="mark" style={{ color: n.mark === '✓' ? 'var(--text)' : 'var(--accent)' }}>{n.mark}</span><span>{n.text} {n.details && <button class="linkbtn" style={{ minHeight: 0, fontSize: '13px', display: 'inline' }} onClick={() => setDetails(!details)}>{details ? 'Hide details' : 'Show all checks'}</button>}</span></div>
+                  <div key={n.text} class="check"><span class="mark" style={{ color: n.mark === '✓' ? 'var(--text)' : 'var(--accent)' }}>{n.mark}</span><span>{n.text} {n.details && <button class="linkbtn" style={{ minHeight: 0, fontSize: '13px', display: 'inline' }} onClick={() => setDetails(!details)}>{details ? 'Hide details' : 'Show all checks'}</button>}</span></div>
                 ))}</Card>
               </Section>
               {details && (
                 <>
                   <Section title="Checks">
-                    <Card>{a.checks.map((c) => <div class="check">{c.ok ? <I.ICheck style={{ flexShrink: 0, marginTop: '2px', color: '#fff' }} /> : <span class="mark" style={{ color: 'var(--accent)' }}>!</span>}<span>{c.text}</span></div>)}</Card>
+                    <Card>{a.checks.map((c) => <div key={c.text} class="check">{c.ok ? <I.ICheck style={{ flexShrink: 0, marginTop: '2px', color: '#fff' }} /> : <span class="mark" style={{ color: 'var(--accent)' }}>!</span>}<span>{c.text}</span></div>)}</Card>
                   </Section>
                   {a.info.length > 0 && <Group title="Good to know" items={a.info} mark="i" col="var(--muted)" />}
                   <TxSection a={a} />
@@ -363,7 +363,7 @@ export function SignedExport() {
         <div>
           <div class="card">
             <button class="toggleline" style={{ background: 'none', border: 'none', color: 'var(--text)', width: '100%', fontFamily: 'var(--sans)' }} aria-expanded={help ? 'true' : 'false'} onClick={() => setHelp(!help)}><span>Which wallet will read it?</span><span>{help ? '−' : '+'}</span></button>
-            {help && rows.map(([f, ws]) => <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', padding: '9px 14px', borderTop: '1px solid var(--line)' }}><span style={{ fontSize: '13px', minWidth: '130px' }}>{f}</span><span class="small">{ws}</span></div>)}
+            {help && rows.map(([f, ws]) => <div key={f} style={{ display: 'flex', alignItems: 'baseline', gap: '10px', padding: '9px 14px', borderTop: '1px solid var(--line)' }}><span style={{ fontSize: '13px', minWidth: '130px' }}>{f}</span><span class="small">{ws}</span></div>)}
           </div>
         </div>
       </div>
@@ -405,7 +405,7 @@ export function PsbtDetails() {
               <Row k="Replace-by-fee" v={a.rbf ? 'On' : 'Off'} />
             </Card></Section>
             {a.inputs.map((x) => (
-              <Section title={'Input ' + x.n + ' · ' + (x.amount === null ? '?' : fmtAmt(x.amount, unit, false))}><Card>
+              <Section key={x.n} title={'Input ' + x.n + ' · ' + (x.amount === null ? '?' : fmtAmt(x.amount, unit, false))}><Card>
                 <Row k="Outpoint" v={x.outpoint} mono ex={{ title: 'Input ' + x.n + ' · outpoint', value: x.outpoint, file: 'input-' + x.n + '-outpoint.txt' }} />
                 {x.own && x.own.path && <Row k="Path" v={x.own.path} mono />}
                 {x.pubkey && <Row k="Public key" v={x.pubkey} mono ex={{ title: 'Input ' + x.n + ' · public key', value: x.pubkey, file: 'input-' + x.n + '-pubkey.txt' }} />}
@@ -417,7 +417,7 @@ export function PsbtDetails() {
           </div>
           <div>
             {a.outputs.map((o) => (
-              <Section title={'Output ' + o.n + ' · ' + fmtAmt(o.amount, unit, false)}><Card>
+              <Section key={o.n} title={'Output ' + o.n + ' · ' + fmtAmt(o.amount, unit, false)}><Card>
                 {o.kind === 'data' ? <Row k="OP_RETURN data" v={o.data.hex} mono ex={{ title: 'Output ' + o.n + ' · data', value: o.data.hex, file: 'output-' + o.n + '-data.txt' }} />
                   : <Row k="Address" v={o.address || o.script} mono ex={{ title: 'Output ' + o.n + ' · address', value: o.address || o.script, file: 'output-' + o.n + '-address.txt' }} />}
                 <Row k="Type" v={o.scriptName} />

@@ -3,7 +3,7 @@ import { h, Fragment } from 'preact';
 import { useState, useMemo, useRef, useEffect } from 'preact/hooks';
 import { go } from '../router.js';
 import { getState, setState, patch, useStore } from '../store.js';
-import { FlowShell, StepRow, Seg, Switch, Spacer, OutField, ExportBtn, PrivChip, InField, I, Card, walletLabel, useNet } from '../kit.jsx';
+import { FlowShell, StepRow, Seg, Switch, Spacer, OutField, ExportBtn, PrivChip, InField, I, walletLabel, useNet } from '../kit.jsx';
 import { environment } from '../env.js';
 import { Keyboard, useKbd } from '../Keyboard.jsx';
 import { makeEntropy, countedBits, neededBits, DICE_BITS } from '../../core/entropy.js';
@@ -170,13 +170,13 @@ export function AddRandomness() {
       </div>
       <div class="utabs" role="tablist" style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))' }}>
         {[['dice', 'Dice' + (S.dice.length ? ' · ' + S.dice.length : '')], ['coins', 'Coins' + (S.coins.length ? ' · ' + S.coins.length : '')], ['draw', 'Drawing' + (S.strokes.length ? ' ✓' : '')]].map(([id, l]) => (
-          <button role="tab" aria-selected={S.tab === id ? 'true' : 'false'} class={S.tab === id ? 'on' : ''} style={{ height: '48px', fontSize: '15px' }} onClick={() => up({ tab: id })}>{l}</button>
+          <button key={id} role="tab" aria-selected={S.tab === id ? 'true' : 'false'} class={S.tab === id ? 'on' : ''} style={{ height: '48px', fontSize: '15px' }} onClick={() => up({ tab: id })}>{l}</button>
         ))}
       </div>
       {S.tab === 'dice' && (
         <div class="stack14">
           <span class="small">Roll a real die and click the face it shows. Don't pick numbers yourself.</span>
-          <div class="dice">{[1, 2, 3, 4, 5, 6].map((n) => <button aria-label={'Die shows ' + n} onClick={() => up({ dice: S.dice.concat([n]) })}>{n}</button>)}</div>
+          <div class="dice">{[1, 2, 3, 4, 5, 6].map((n) => <button key={n} aria-label={'Die shows ' + n} onClick={() => up({ dice: S.dice.concat([n]) })}>{n}</button>)}</div>
           <div class="stack"><span class="note">Entered · {S.dice.length} rolls</span><div class="seqbox" style={{ color: S.dice.length ? 'var(--text)' : 'var(--ph)' }}>{seq(S.dice, 'No rolls yet')}</div></div>
           <div class="btnrow"><button class="btn-secondary btn-sm" onClick={() => up({ dice: S.dice.slice(0, -1) })}>Undo</button><button class="btn-secondary btn-sm" onClick={() => up({ dice: [] })}>Clear rolls</button></div>
         </div>
@@ -232,7 +232,7 @@ export function SeedGrid({ words, shown, onShow }) {
   return (
     <div class="blurwrap">
       <div class={'wordgrid' + (shown ? '' : ' blurred')} aria-hidden={shown ? 'false' : 'true'}>
-        {words.map((w, i) => <div class="wordcell"><span class="n">{i + 1}</span><span class="w">{shown ? w : 'xxxxxx'}</span></div>)}
+        {words.map((w, i) => <div key={i} class="wordcell"><span class="n">{i + 1}</span><span class="w">{shown ? w : 'xxxxxx'}</span></div>)}
       </div>
       {!shown && <button class="revealbtn" onClick={onShow}><I.IEye />Click to reveal</button>}
     </div>
@@ -306,13 +306,13 @@ export function CheckBackup() {
         <p class="lead">Pick the right word for each position from your paper.</p>
       </div>
       {qs.map((q) => (
-        <div class="stack" style={{ gap: '8px' }}>
+        <div key={q.n} class="stack" style={{ gap: '8px' }}>
           <span style={{ fontSize: '15px', fontWeight: 500 }}>Word #{q.n}</span>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: '8px' }}>
             {q.opts.map((w) => {
               const picked = ans[q.n] === w;
               const border = !picked ? '1px solid var(--line)' : w === q.right ? '2px solid var(--accent)' : '2px solid var(--danger)';
-              return <button aria-pressed={picked ? 'true' : 'false'} style={{ height: '48px', background: 'var(--surface)', color: 'var(--text)', font: '500 15px var(--mono)', cursor: 'pointer', border }} onClick={() => setAns({ ...ans, [q.n]: w })}>{w}</button>;
+              return <button key={w} aria-pressed={picked ? 'true' : 'false'} style={{ height: '48px', background: 'var(--surface)', color: 'var(--text)', font: '500 15px var(--mono)', cursor: 'pointer', border }} onClick={() => setAns({ ...ans, [q.n]: w })}>{w}</button>;
             })}
           </div>
         </div>

@@ -263,8 +263,7 @@ export function parseBip21(t) {
   return res;
 }
 
-// ---- Output encodings for a PSBT ----
-export const QR_FORMATS = ['UR', 'BBQr', 'Base64', 'Base43'];
+// ---- Output encodings for a PSBT: 'UR', 'BBQr', 'Base64' or 'Base43' ----
 export function psbtQRFrames(bytes, format) {
   if (format === 'Base64') return { frames: [base64.encode(bytes)], animated: false };
   if (format === 'Base43') return { frames: [base43.encode(bytes)], animated: false, alnum: true };

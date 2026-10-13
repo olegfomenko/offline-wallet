@@ -18,13 +18,18 @@ const result = await esbuild.build({
 const js = result.outputFiles[0].text.split('</script').join('<\\/script').split('\x7f').join('\\x7f');
 
 // This is a wallet: refuse to build if any network API made it into the bundle.
-for (const api of ['fetch(', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'sendBeacon', 'RTCPeerConnection']) {
+for (const api of ['fetch(', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'sendBeacon', 'RTCPeerConnection', 'importScripts']) {
   if (js.includes(api)) throw new Error('Network API in bundle: ' + api);
 }
+
+// The CSP allows exactly this script by its hash, so no other inline script (injected by an
+// extension, or by someone editing the file) can run on the page.
+const scriptSrc = "'sha256-" + createHash('sha256').update(js).digest('base64') + "'";
 
 const html = readFileSync('src/index.html', 'utf8')
   .replace('/*@@CSS@@*/', () => readFileSync('src/styles.css', 'utf8'))
   .replace('/*@@JS@@*/', () => js)
+  .replace('{{SCRIPT_SRC}}', () => scriptSrc)
   .replaceAll('{{VERSION}}', version);
 
 mkdirSync('dist', { recursive: true });

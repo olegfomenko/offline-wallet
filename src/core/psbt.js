@@ -1,8 +1,12 @@
 // PSBT review and signing. Every claim shown to the user is checked here: input ownership by
 // re-deriving the key, amounts against the full previous transaction, change by re-deriving the
 // output script from its path. Anything that can't be proven is reported, not assumed.
+//
+// The analysis holds no private keys: an owned input or output records its path and fingerprint
+// (or the index of a single key), and signing re-derives the key from the wallet. So an analysis
+// kept in the Signed log can't keep key material alive after the wallet is closed.
 import * as btc from '@scure/btc-signer';
-import { hex, equal, utf8, sha256d } from './util.js';
+import { hex, equal, utf8, sha256d, concat, varint, wipe, MONTHS } from './util.js';
 import { HARDENED_OFFSET, payment, scriptToAddress, scriptKind, formatPath, fpHex, NETS, xonly } from './hd.js';
 import { pubOf } from './keys.js';
 import { getPrevOut } from '@scure/btc-signer/transaction.js';
@@ -26,12 +30,7 @@ export function parsePsbt(bytes) {
 
 function typeOfScript(script) {
   if (script.length && script[0] === 0x6a) return 'opreturn';
-  try {
-    const t = btc.OutScript.decode(script).type;
-    if (t === 'wpkh' || t === 'pkh' || t === 'tr') return t;
-    if (t === 'sh') return 'sh';
-    return t;
-  } catch (e) { return script[0] === 0x6a ? 'opreturn' : 'unknown'; }
+  try { return btc.OutScript.decode(script).type; } catch (e) { return 'unknown'; }
 }
 
 /** Find the private node for a BIP32 derivation row, or null. Pubkey equality is checked by the caller. */
@@ -52,14 +51,19 @@ function nodeFor(w, fingerprint, path) {
   return null;
 }
 
-/** Which of our keys controls `script`? Returns { priv, pub, type, path, branch, index } or null. */
+/**
+ * Which of our keys controls `script`? Returns { pub, type, path, branch, index, … } or null.
+ * The record names the key (keyIdx for a single key, fpNum + pathArr for a derived one) but
+ * never holds it: privFor() re-derives it when signing.
+ */
 function matchOwn(w, script, derivs, tapDerivs, net) {
   const st = typeOfScript(script);
   if (w.kind === 'keys') {
-    for (const k of w.keys) {
+    for (let i = 0; i < w.keys.length; i++) {
+      const k = w.keys[i];
       const pub = pubOf(k.priv, k.compressed);
       for (const t of k.compressed ? ['wpkh', 'shwpkh', 'pkh', 'tr'] : ['pkh']) {
-        if (equal(payment(t, pub, net).script, script)) return { priv: k.priv, pub, type: t, path: null, label: k.label, compressed: k.compressed };
+        if (equal(payment(t, pub, net).script, script)) return { keyIdx: i, pub, type: t, path: null, label: k.label, compressed: k.compressed };
       }
     }
     return null;
@@ -79,7 +83,7 @@ function matchOwn(w, script, derivs, tapDerivs, net) {
       if (equal(payment(t, pub, net).script, script)) {
         const p = r.path;
         return {
-          node, pub, type: t, path: formatPath(p), fp: fpHex(r.fp).toUpperCase(), pathArr: p.slice(), fpNum: r.fp >>> 0, compressed: true,
+          pub, type: t, path: formatPath(p), fp: fpHex(r.fp).toUpperCase(), pathArr: p.slice(), fpNum: r.fp >>> 0, compressed: true,
           branch: p.length >= 2 ? p[p.length - 2] : null, index: p.length >= 1 ? p[p.length - 1] : null,
         };
       }
@@ -154,7 +158,7 @@ function estimateVsize(tx, inputs) {
   return Math.ceil(weight / 4);
 }
 const TYPE_NAMES = { wpkh: 'Native SegWit', shwpkh: 'Nested SegWit', pkh: 'Legacy', tr: 'Taproot' };
-const varSize = (n) => (n < 0xfd ? 1 : n <= 0xffff ? 3 : 5);
+const varSize = (n) => varint(n).length;
 
 export function locktimeInfo(lt) {
   if (!lt) return { kind: 'none', value: 0 };
@@ -324,20 +328,44 @@ export function analyzePsbt(tx, w, { net = 'main', feeLimitPct = 5 } = {}) {
   };
 }
 
+/**
+ * The private key for an owned input, re-derived from the wallet. Always a fresh copy, so the
+ * caller can wipe it when done. The key must give the public key the analysis matched.
+ */
+function privFor(w, own) {
+  let priv = null;
+  if (own.keyIdx !== undefined) {
+    const k = w.keys && w.keys[own.keyIdx];
+    if (k && k.priv) priv = k.priv.slice();
+  } else if (own.pathArr) {
+    let node = null;
+    try { node = nodeFor(w, own.fpNum, own.pathArr); } catch (e) { node = null; }
+    if (node && node.privateKey) priv = node.privateKey; // nodeFor derives a new node: this buffer is ours
+  }
+  if (!priv || !equal(pubOf(priv, own.compressed !== false), own.pub)) {
+    wipe(priv);
+    throw new Error('The key for this input is not in the open wallet.');
+  }
+  return priv;
+}
+
 /** A copy of the PSBT with what we know and the PSBT left out filled in, so signing doesn't fail on it. */
-function signingCopy(tx, analysis) {
+function signingCopy(tx, analysis, w) {
   if (!analysis.canSign) throw new Error('This transaction has blockers or missing data.');
   const t = btc.Transaction.fromPSBT(tx.toPSBT(), TX_OPTS);
   const todo = [];
-  for (const inp of analysis.inputs) {
-    if (!inp.own || inp.finalized) continue;
-    const idx = inp.n - 1;
-    const cur = t.getInput(idx);
-    if (inp.own.type === 'shwpkh' && !cur.redeemScript) t.updateInput(idx, { redeemScript: payment('shwpkh', inp.own.pub, analysis.net).redeemScript });
-    if (inp.own.type === 'tr' && !cur.tapInternalKey) t.updateInput(idx, { tapInternalKey: xonly(inp.own.pub) });
-    const priv = inp.own.node ? inp.own.node.privateKey : inp.own.priv;
-    if (!priv) throw new Error('Input ' + inp.n + ': no private key.');
-    todo.push({ inp, idx, priv });
+  try {
+    for (const inp of analysis.inputs) {
+      if (!inp.own || inp.finalized) continue;
+      const idx = inp.n - 1;
+      const cur = t.getInput(idx);
+      if (inp.own.type === 'shwpkh' && !cur.redeemScript) t.updateInput(idx, { redeemScript: payment('shwpkh', inp.own.pub, analysis.net).redeemScript });
+      if (inp.own.type === 'tr' && !cur.tapInternalKey) t.updateInput(idx, { tapInternalKey: xonly(inp.own.pub) });
+      todo.push({ inp, idx, priv: privFor(w, inp.own) });
+    }
+  } catch (e) {
+    for (const x of todo) wipe(x.priv);
+    throw new Error('Input ' + (todo.length + 1) + ': ' + e.message);
   }
   return { t, todo };
 }
@@ -358,15 +386,19 @@ function finishSigned(t, analysis, signed) {
 
 /**
  * Sign every input of this wallet on a copy of the PSBT; nothing is changed unless all succeed.
- * Returns { psbt, final, txHex, txid, signedCount }.
+ * The keys are re-derived from `w` and wiped afterwards. Returns { psbt, final, txHex, txid, signedCount }.
  */
 export function signPsbt(tx, analysis, w) {
-  const { t, todo } = signingCopy(tx, analysis);
+  const { t, todo } = signingCopy(tx, analysis, w);
   const allowed = [btc.SigHash.DEFAULT, btc.SigHash.ALL];
   let signed = 0;
-  for (const { inp, idx, priv } of todo) {
-    if (!t.signIdx(priv, idx, allowed)) throw new Error('Input ' + inp.n + ' could not be signed.');
-    signed++;
+  try {
+    for (const { inp, idx, priv } of todo) {
+      if (!t.signIdx(priv, idx, allowed)) throw new Error('Input ' + inp.n + ' could not be signed.');
+      signed++;
+    }
+  } finally {
+    for (const x of todo) wipe(x.priv);
   }
   return finishSigned(t, analysis, signed);
 }
@@ -394,22 +426,37 @@ function sighashOf(t, idx, type) {
 /**
  * Prepare anti-exfil signing: one nonce per input of this wallet. Returns
  * { t, items: [{ n, idx, alg: 'ecdsa'|'schnorr', address, amount, path, hash, sighash, key, pub }] }.
- * `key` is the signing key (tweaked for Taproot key path). Keep it in memory only.
+ * Every `key` is a fresh copy of the signing key (tweaked for Taproot key path), re-derived from
+ * `w`: call wipeAntiExfil() when the signing flow ends, whether or not it signed.
  */
-export function prepareAntiExfil(tx, analysis) {
-  const { t, todo } = signingCopy(tx, analysis);
-  const items = todo.map(({ inp, idx, priv }) => {
-    const type = inp.own.type;
-    const { hash, sighash } = sighashOf(t, idx, type);
-    if (type === 'tr') {
-      if (t.getInput(idx).tapMerkleRoot) throw new Error('Input ' + inp.n + ': Taproot script trees aren’t supported.');
-      const key = taprootTweakPrivKey(priv);
-      return { n: inp.n, idx, alg: 'schnorr', type, address: inp.address, amount: inp.amount, path: inp.own.path, hash, sighash, key, pub: schnorr.getPublicKey(key) };
+export function prepareAntiExfil(tx, analysis, w) {
+  const { t, todo } = signingCopy(tx, analysis, w);
+  const items = [];
+  try {
+    for (const { inp, idx, priv } of todo) {
+      const type = inp.own.type;
+      const { hash, sighash } = sighashOf(t, idx, type);
+      if (type === 'tr') {
+        if (t.getInput(idx).tapMerkleRoot) throw new Error('Input ' + inp.n + ': Taproot script trees aren’t supported.');
+        const key = taprootTweakPrivKey(priv);
+        wipe(priv);
+        items.push({ n: inp.n, idx, alg: 'schnorr', type, address: inp.address, amount: inp.amount, path: inp.own.path, hash, sighash, key, pub: schnorr.getPublicKey(key) });
+      } else {
+        items.push({ n: inp.n, idx, alg: 'ecdsa', type, address: inp.address, amount: inp.amount, path: inp.own.path, hash, sighash, key: priv, pub: pubOf(priv) });
+      }
     }
-    return { n: inp.n, idx, alg: 'ecdsa', type, address: inp.address, amount: inp.amount, path: inp.own.path, hash, sighash, key: priv, pub: pubOf(priv) };
-  });
-  if (!items.length) throw new Error('No input of this wallet left to sign.');
+    if (!items.length) throw new Error('No input of this wallet left to sign.');
+  } catch (e) {
+    for (const x of todo) wipe(x.priv);
+    for (const it of items) wipe(it.key);
+    throw e;
+  }
   return { t, items, analysis };
+}
+
+/** Forget the keys a prepareAntiExfil() result holds. */
+export function wipeAntiExfil(prep) {
+  if (prep && prep.items) for (const it of prep.items) wipe(it.key);
 }
 
 /** Step 2: the signer nonce R for each item, given the host commitments (32 bytes each). */
@@ -426,17 +473,15 @@ export function signPsbtAntiExfil(prep, commitments, datas) {
   const sigs = items.map((it, i) => {
     if (it.alg === 'schnorr') {
       const r = schnorrSignAntiExfil(it.key, it.hash, commitments[i], datas[i]);
-      return { it, r, upd: { tapKeySig: it.sighash === btc.SigHash.DEFAULT ? r.sig : concatB(r.sig, Uint8Array.of(it.sighash)) } };
+      return { it, r, upd: { tapKeySig: it.sighash === btc.SigHash.DEFAULT ? r.sig : concat(r.sig, Uint8Array.of(it.sighash)) } };
     }
     const r = ecdsaSignAntiExfil(it.key, it.hash, commitments[i], datas[i]);
-    return { it, r, upd: { partialSig: [[it.pub, concatB(r.der, Uint8Array.of(it.sighash))]] } };
+    return { it, r, upd: { partialSig: [[it.pub, concat(r.der, Uint8Array.of(it.sighash))]] } };
   });
   for (const { it, upd } of sigs) t.updateInput(it.idx, upd, true);
   const res = finishSigned(t, analysis, sigs.length);
   return { ...res, nonces: sigs.map(({ it, r }) => ({ n: it.n, R: r.R, Rfinal: r.Rfinal })) };
 }
-
-const concatB = (a, b) => { const o = new Uint8Array(a.length + b.length); o.set(a); o.set(b, a.length); return o; };
 
 /** JSON view of the PSBT in the spirit of Bitcoin Core's decodepsbt. */
 export function psbtJSON(tx, a) {
@@ -464,8 +509,7 @@ export function psbtJSON(tx, a) {
 export function fmtPct(p) { return p >= 10 ? p.toFixed(1) + '%' : p >= 1 ? p.toFixed(2).replace(/0$/, '') + '%' : p.toFixed(2) + '%'; }
 export function fmtRate(r) { return r === null ? '?' : r >= 100 ? Math.round(r).toLocaleString('en-US') : r.toFixed(1); }
 export function fmtDate(d) {
-  const M = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return d.getUTCDate() + ' ' + M[d.getUTCMonth()] + ' ' + d.getUTCFullYear() + ', ' + String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0') + ' UTC';
+  return d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()] + ' ' + d.getUTCFullYear() + ', ' + String(d.getUTCHours()).padStart(2, '0') + ':' + String(d.getUTCMinutes()).padStart(2, '0') + ' UTC';
 }
 function humanBlocks(b) { const h = b * 10 / 60; return h < 48 ? Math.round(h) + ' hours' : Math.round(h / 24) + ' days'; }
 function humanSecs(s) { const h = s / 3600; return h < 48 ? Math.round(h) + ' hours' : Math.round(h / 24) + ' days'; }

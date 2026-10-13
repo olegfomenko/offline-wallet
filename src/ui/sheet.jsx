@@ -2,11 +2,11 @@
 // (Type · Paste · Scan QR · QR image · File). Centered dialog on desktop, bottom sheet on phones.
 import { h, Fragment } from 'preact';
 import { useEffect, useRef, useState, useMemo } from 'preact/hooks';
-import { getState, setState, useStore } from './store.js';
+import { setState, useStore } from './store.js';
 import * as I from './icons.jsx';
 import { qrMatrix, qrSvgPath, qrPngBlob, download, copyText, pasteText, pickFile, fileBytes, decodeImageFile, startCamera, stopCamera, scanLoop } from './io.js';
 import { MultiPartCollector } from '../core/transport.js';
-import { hex } from '../core/util.js';
+import { bytesOrBin as asText } from '../core/encoding.js';
 
 const close = () => setState({ sheet: null });
 const slug = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -102,7 +102,7 @@ function ExportBody({ s }) {
       {s.priv && <span class="warnbox">Anyone who sees, scans or gets a copy of this can spend. Check that no one can see your screen.</span>}
       {!qrOnly && (
         <div role="tablist" class="seg dark" style={{ gridTemplateColumns: '1fr 1fr' }}>
-          {[['text', 'Text'], ['qr', 'QR']].map(([k, l]) => <button role="tab" aria-selected={tab === k ? 'true' : 'false'} class={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
+          {[['text', 'Text'], ['qr', 'QR']].map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k ? 'true' : 'false'} class={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{l}</button>)}
         </div>
       )}
       {s.extra}
@@ -183,7 +183,7 @@ function ImportBody({ s }) {
       {scan ? <Scanner multi={s.multi} onText={(t) => done(t, 'scan')} onCancel={() => setScan(false)} /> : (
         <div class="optlist">
           {O.map(([k, l, sub, Icon]) => (
-            <button onClick={() => pick(k)}>
+            <button key={k} onClick={() => pick(k)}>
               <span class="oi"><Icon /></span>
               <span class="ot"><b>{l}</b><small class={s.priv && k === 'paste' ? 'warn' : ''}>{sub}</small></span>
             </button>
@@ -195,10 +195,6 @@ function ImportBody({ s }) {
     </>
   );
 }
-function asText(b) {
-  try { return new TextDecoder('utf-8', { fatal: true }).decode(b); } catch (e) { return 'BIN:' + hex.encode(b); }
-}
-
 function Scanner({ multi, onText, onCancel }) {
   const vref = useRef(null);
   const [err, setErr] = useState('');

@@ -1,13 +1,14 @@
 // Single private keys: WIF, Electrum "type:WIF", single-key descriptors, raw hex and BIP38 (password-protected).
 import { secp256k1 } from '@noble/curves/secp256k1.js';
+import { bytesToNumberBE, numberToBytesBE } from '@noble/curves/utils.js';
 import { scryptAsync } from '@noble/hashes/scrypt.js';
 import { ecb } from '@noble/ciphers/aes.js';
 import { base58check, NETS, addressOf, parseDescriptor } from './hd.js';
 import { concat, equal, sha256d, hex, isHex, utf8 } from './util.js';
 
 const N = secp256k1.Point.CURVE().n;
-const bytesToBig = (b) => BigInt('0x' + (hex.encode(b) || '0'));
-const bigToBytes = (n) => hex.decode(n.toString(16).padStart(64, '0'));
+const bytesToBig = bytesToNumberBE;
+const bigToBytes = (n) => numberToBytesBE(n, 32);
 
 export function validPriv(priv) {
   if (priv.length !== 32) return false;

@@ -4,45 +4,25 @@ import { h, Fragment } from 'preact';
 import { useState, useMemo, useEffect } from 'preact/hooks';
 import { go } from '../router.js';
 import { getState, setState, patch, useStore, addLog } from '../store.js';
-import { NavShell, TitleRow, Seg, Chips, UTabs, Spacer, OutField, ExportBtn, PrivChip, InField, I, Card, Addr, shortAddr, fmtTime } from '../kit.jsx';
-import { accountKeys, account, addressAt } from '../../core/wallet.js';
-import { TYPES, TYPE_ORDER, NETS, stdAccountPath, parsePath, normPath, payment, xonly, serializeExt, versionName, accountDescriptor, withChecksum, decodeAddress } from '../../core/hd.js';
+import { NavShell, TitleRow, Seg, Chips, UTabs, OutField, ExportBtn, InField, I, Addr, shortAddr, fmtTime } from '../kit.jsx';
+import { accountOf, resolveSel } from '../account.js';
+import { download } from '../io.js';
+import { accountKeys, addressAt } from '../../core/wallet.js';
+import { TYPES, TYPE_ORDER, NETS, stdAccountPath, normPath, payment, xonly, withChecksum } from '../../core/hd.js';
 import { encodeWIF, pubOf, ELECTRUM_PREFIX } from '../../core/keys.js';
 import { signMessageECDSA, verifyMessageECDSA, signMessageSchnorr, verifyMessageSchnorr } from '../../core/message.js';
-import { hex, base64, utf8, hash160, isHex } from '../../core/util.js';
-import * as btc from '@scure/btc-signer';
+import { hex, base64, hash160, isHex } from '../../core/util.js';
+import { textToBytes, bytesToText } from '../../core/encoding.js';
 import { startMessageAntiExfil } from './antiexfil.jsx';
 
 const TYPE_HINT = { wpkh: 'P2WPKH · BIP84', tr: 'P2TR · BIP86', shwpkh: 'P2SH-P2WPKH · BIP49', pkh: 'P2PKH · BIP44' };
-
-/** Everything about the current account selection. */
-export function useAccount(st) {
-  const w = st.wallet;
-  const net = st.settings.net;
-  const a = st.addr;
-  const type = w.kind === 'xkey' && w.typeFixed ? w.defaultType : a.type;
-  const cp = w.root ? a.cpath[type] : null;
-  const K = accountKeys(w, type, net, a.acct, cp);
-  return { w, net, type, cp, K, fixed: !w.root };
-}
-
-/** Resolve an address selection to keys. */
-export function resolveSel(w, sel, net) {
-  if (sel.keyIdx !== undefined) {
-    const k = w.keys[sel.keyIdx];
-    const pub = pubOf(k.priv, k.compressed);
-    return { priv: k.priv, pub, compressed: k.compressed, address: payment(k.type, pub, net).address, type: k.type, path: null, key: k };
-  }
-  const node = w.root ? w.root.derive(sel.base).deriveChild(sel.branch).deriveChild(sel.i) : w.node.deriveChild(sel.branch).deriveChild(sel.i);
-  return { node, priv: node.privateKey, pub: node.publicKey, compressed: true, address: payment(sel.type, node.publicKey, net).address, type: sel.type, path: sel.base + '/' + sel.branch + '/' + sel.i };
-}
 
 export function Addresses() {
   const st = useStore();
   const w = st.wallet;
   if (w.kind === 'keys') return <KeyAddresses />;
   const a = st.addr;
-  const { net, type, cp, K, fixed } = useAccount(st);
+  const { net, type, cp, K, fixed } = accountOf(st);
   const set = (p) => patch('addr', p);
   const prv = a.kmode === 'prv';
   const xName = K.xName, sName = K.sName;
@@ -73,7 +53,7 @@ export function Addresses() {
           ) : (
             <div class="typegrid" role="radiogroup" aria-label="Address type">
               {TYPE_ORDER.map((t) => (
-                <button role="radio" aria-checked={type === t ? 'true' : 'false'} class={type === t ? 'on' : ''} onClick={() => set({ type: t, idx: 0 })}>
+                <button key={t} role="radio" aria-checked={type === t ? 'true' : 'false'} class={type === t ? 'on' : ''} onClick={() => set({ type: t, idx: 0 })}>
                   <b>{TYPES[t].label}</b><span>{w.root && a.cpath[t] ? 'Custom path' : TYPE_HINT[t]}</span>
                 </button>
               ))}
@@ -93,7 +73,7 @@ export function Addresses() {
             <div class="stack" style={{ gap: '4px' }}>
               <label for="ad-net" class="note">Network</label>
               <select id="ad-net" class="select" value={net} onChange={(e) => { patch('settings', { net: e.currentTarget.value }); set({ idx: 0 }); }}>
-                {Object.values(NETS).map((n) => <option value={n.id}>{n.name}</option>)}
+                {Object.values(NETS).map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
               </select>
             </div>
           </div>
@@ -114,7 +94,7 @@ export function Addresses() {
             <div role="tablist" aria-label="Key kind" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', padding: '10px 14px 0' }}>
               {[['pub', 'Public key'], ['prv', 'Private key']].map(([id, l]) => {
                 const on = (a.kmode || 'pub') === id;
-                return <button role="tab" aria-selected={on ? 'true' : 'false'} onClick={() => set({ kmode: id })} style={{ height: '36px', font: '600 14px var(--sans)', cursor: 'pointer', background: 'transparent', border: '1px solid ' + (on ? (id === 'prv' ? 'var(--danger)' : '#fff') : 'var(--line)'), color: on ? (id === 'prv' ? 'var(--danger)' : '#fff') : 'var(--muted)' }}>{l}</button>;
+                return <button key={id} role="tab" aria-selected={on ? 'true' : 'false'} onClick={() => set({ kmode: id })} style={{ height: '36px', font: '600 14px var(--sans)', cursor: 'pointer', background: 'transparent', border: '1px solid ' + (on ? (id === 'prv' ? 'var(--danger)' : '#fff') : 'var(--line)'), color: on ? (id === 'prv' ? 'var(--danger)' : '#fff') : 'var(--muted)' }}>{l}</button>;
               })}
             </div>
             {prv ? (
@@ -125,7 +105,7 @@ export function Addresses() {
             ) : (
               <>
                 <div class="utabs" role="tablist" aria-label="Key format" style={{ gridTemplateColumns: 'repeat(' + F3.length + ', minmax(0,1fr))', padding: '0 6px' }}>
-                  {F3.map(([id, l]) => <button role="tab" aria-selected={fmt === id ? 'true' : 'false'} class={fmt === id ? 'on' : ''} onClick={() => set({ fmt: id })}>{l}</button>)}
+                  {F3.map(([id, l]) => <button key={id} role="tab" aria-selected={fmt === id ? 'true' : 'false'} class={fmt === id ? 'on' : ''} onClick={() => set({ fmt: id })}>{l}</button>)}
                 </div>
                 <div style={{ padding: '12px 14px' }}>
                   <OutField label={fmtLabel} value={keyValue} spec={{ title: fmtLabel + ' · ' + TYPES[type].label, value: keyValue, file: (fmt === 'desc' ? 'descriptor' : fmtLabel) + '-' + type + '.txt' }} note={notes[fmt]} />
@@ -138,7 +118,7 @@ export function Addresses() {
           <div class="card">
             <UTabs items={[[0, 'Receiving (0)'], [1, 'Change (1)']]} value={a.branch} onChange={(b) => set({ branch: b, idx: 0 })} label="Branch" />
             {rows.map((r) => (
-              <button class="addrrow" onClick={() => { setState({ addrSel: r.sel }); go('address'); }}>
+              <button key={r.i} class="addrrow" onClick={() => { setState({ addrSel: r.sel }); go('address'); }}>
                 <span class="i">#{r.i}</span><span class="a">{r.addr}</span><I.IChev />
               </button>
             ))}
@@ -165,7 +145,7 @@ function KeyAddresses() {
       <div class="card">
         {w.keys.map((k, i) => {
           const a = payment(k.type, pubOf(k.priv, k.compressed), net).address;
-          return <button class="addrrow" onClick={() => { setState({ addrSel: { keyIdx: i, type: k.type, net, addr: a } }); go('address'); }}><span class="i">{k.label || 'Key ' + (i + 1)}</span><span class="a">{a}</span><I.IChev /></button>;
+          return <button key={i} class="addrrow" onClick={() => { setState({ addrSel: { keyIdx: i, type: k.type, net, addr: a } }); go('address'); }}><span class="i">{k.label || 'Key ' + (i + 1)}</span><span class="a">{a}</span><I.IChev /></button>;
         })}
       </div>
     </NavShell>
@@ -206,13 +186,13 @@ export function AddressHelp() {
       <span class="small">Your watch-only wallet must use the same address type and path as this device, or it shows different addresses. Apply one below to switch the Addresses screen to it.</span>
       <span class="caps s12">Standard types</span>
       {STD.map((o) => (
-        <Item head={<>{o.name}{o.rec && <span class="tag" style={{ color: 'var(--accent)' }}>RECOMMENDED</span>}</>} sub={o.path + ' · ' + o.prefix} label={'Apply ' + o.name + ' ' + o.path} onApply={() => apply(o.type, o.path, true)}>
+        <Item key={o.type} head={<>{o.name}{o.rec && <span class="tag" style={{ color: 'var(--accent)' }}>RECOMMENDED</span>}</>} sub={o.path + ' · ' + o.prefix} label={'Apply ' + o.name + ' ' + o.path} onApply={() => apply(o.type, o.path, true)}>
           <span class="small"><span style={{ color: 'var(--text)' }}>Works in </span>{o.yes}</span>
           {o.no && <span class="small"><span style={{ color: 'var(--text)' }}>Not in </span>{o.no}</span>}
         </Item>
       ))}
       <span class="caps s12">Wallet-specific paths</span>
-      {SP.map((o) => <Item head={o.wallet} sub={o.path + ' · ' + o.name} label={'Apply ' + o.wallet + ' path'} onApply={() => apply(o.type, o.path, false)}><span class="small">{o.note}</span></Item>)}
+      {SP.map((o) => <Item key={o.wallet} head={o.wallet} sub={o.path + ' · ' + o.name} label={'Apply ' + o.wallet + ' path'} onApply={() => apply(o.type, o.path, false)}><span class="small">{o.note}</span></Item>)}
       <div class="stack" style={{ gap: '6px', padding: '12px 14px', border: '1px solid var(--line)' }}>
         <span style={{ fontWeight: 600 }}>Not sure?</span>
         <span class="small">Open your other wallet, find its first receive address, and compare it with #0 on the Addresses screen. If they differ, try another type here, or use Check an address.</span>
@@ -275,7 +255,7 @@ export function EditPath() {
       {c.ok && <div class="pathlevels" aria-label="Path levels">{levels.map((l) => <div><b>{l.v}</b><span>{l.k}</span></div>)}<div class="fixed"><b>0 / 1</b><span>branch</span></div><div class="fixed"><b>*</b><span>index</span></div></div>}
       <div class="stack" style={{ gap: '8px' }}>
         <span class="caps s12">Quick picks</span>
-        <div class="quick">{quick.map(([p, l]) => <button onClick={() => setPath(p)}>{l}</button>)}</div>
+        <div class="quick">{quick.map(([p, l]) => <button key={p} onClick={() => setPath(p)}>{l}</button>)}</div>
       </div>
       {warns.length > 0 && <div class="stack" style={{ gap: '8px', padding: '12px 14px', border: '1px solid var(--warn)' }}>{warns.map((t) => <span style={{ fontSize: '13px', lineHeight: 1.5 }}>{t}</span>)}</div>}
       {preview && (
@@ -304,7 +284,7 @@ export function AddressDetail() {
   const p = payment(R.type, R.pub, net);
   const tr = R.type === 'tr';
   const pubShown = tr ? hex.encode(xonly(R.pub)) : hex.encode(R.pub);
-  const hashShown = tr ? hex.encode(p.script.subarray(2)) : R.type === 'shwpkh' ? hex.encode(hash160(R.pub)) : hex.encode(hash160(R.pub));
+  const hashShown = hex.encode(tr ? p.script.subarray(2) : hash160(R.pub));
   const spk = hex.encode(p.script);
   const txs = st.log.filter((x) => x.kind === 'psbt' && x.ours && x.ours.includes(R.address));
   const isKey = sel.keyIdx !== undefined;
@@ -318,7 +298,7 @@ export function AddressDetail() {
   const dl = (fmt) => {
     const rows = txs.map((x) => ({ date: new Date(x.time).toISOString(), txid: x.txid }));
     const name = 'signed-' + R.type + '-' + (isKey ? 'key' : sel.branch + '-' + sel.i) + '.' + fmt;
-    import('../io.js').then(({ download }) => download(name, fmt === 'csv' ? 'date,txid\n' + rows.map((r) => r.date + ',' + r.txid).join('\n') + '\n' : JSON.stringify(rows, null, 2), fmt === 'csv' ? 'text/csv' : 'application/json'));
+    download(name, fmt === 'csv' ? 'date,txid\n' + rows.map((r) => r.date + ',' + r.txid).join('\n') + '\n' : JSON.stringify(rows, null, 2), fmt === 'csv' ? 'text/csv' : 'application/json');
   };
   return (
     <NavShell max={1040} gap={18}>
@@ -347,7 +327,7 @@ export function AddressDetail() {
             <span class="caps s12">Signed with this address · {txs.length}</span>
             {txs.length ? (
               <>
-                <div class="card">{txs.map((x) => <button class="listrow" onClick={() => { setState({ tx: x.snapshot }); go('psbt-details'); }}><div class="top"><span class="main mono">{shortAddr(x.txid, 4, 5)}</span><span class="typ" style={{ color: 'var(--accent)' }}>Signed</span></div><span class="date">{fmtTime(x.time)}</span></button>)}</div>
+                <div class="card">{txs.map((x) => <button key={x.id} class="listrow" onClick={() => { setState({ tx: x.snapshot }); go('psbt-details'); }}><div class="top"><span class="main mono">{shortAddr(x.txid, 4, 5)}</span><span class="typ" style={{ color: 'var(--accent)' }}>Signed</span></div><span class="date">{fmtTime(x.time)}</span></button>)}</div>
                 <div class="btnrow"><button class="btn-secondary btn-sm" onClick={() => dl('csv')}><I.IDownload />Download CSV</button><button class="btn-secondary btn-sm" onClick={() => dl('json')}><I.IDownload />Download JSON</button></div>
               </>
             ) : <div class="infoline">Nothing signed with this address yet. Transactions appear here once this device signs an input that spends from it.</div>}
@@ -369,7 +349,7 @@ export function PrivateKey() {
   const [fmtSel, setFmt] = useState('');
   let C;
   if (st.keyScope === 'acct') {
-    const { type, K } = useAccount(st);
+    const { type } = accountOf(st);
     const P = accountKeys(w, type, net, st.addr.acct, w.root ? st.addr.cpath[type] : null, true);
     const fmts = [{ id: 'x', label: P.xName, value: P.x, works: 'Sparrow · Bitcoin Core (in a descriptor)', note: type === 'pkh' ? 'Extended private key at ' + P.path + '. Restores this account in another wallet, which then can spend.' : 'A bare ' + P.xName + ' has no address type, so the wallet asks for it. Electrum reads it as Legacy.' }];
     if (P.slip) fmts.push({ id: 'slip', label: P.sName, value: P.slip, works: 'Electrum', note: 'Same key with the address type in its prefix (SLIP-132), so Electrum shows the right addresses.' });
@@ -403,18 +383,6 @@ export function PrivateKey() {
 }
 
 // ---------- message signing ----------
-export function toBytes(raw, fmt) {
-  if (fmt === 'text') return utf8.encode(raw);
-  if (fmt === 'hex') { const s = raw.replace(/\s+/g, ''); return isHex(s) ? hex.decode(s) : null; }
-  try { return base64.decode(raw); } catch (e) { return null; }
-}
-export function fromBytes(b, fmt) {
-  if (fmt === 'text') { try { return new TextDecoder('utf-8', { fatal: true }).decode(b); } catch (e) { return null; } }
-  if (fmt === 'hex') return hex.encode(b);
-  return base64.encode(b);
-}
-const sigDecode = (s, fmt) => { const t = s.trim(); try { return fmt === 'hex' ? (isHex(t.replace(/\s/g, '')) ? hex.decode(t.replace(/\s/g, '')) : null) : base64.decode(t); } catch (e) { return null; } };
-
 export function SignVerify() {
   const st = useStore();
   const w = st.wallet;
@@ -431,12 +399,12 @@ export function SignVerify() {
   const R = resolveSel(w, sel, net);
   const xpk = hex.encode(xonly(R.pub));
   const isSign = S.tab === 'sign';
-  const bytes = toBytes(S.msg, S.mfmt);
+  const bytes = textToBytes(S.msg, S.mfmt);
   const msgBad = !bytes;
   const switchMsg = (k) => {
     if (k === S.mfmt) return;
     if (!bytes) return set({ msgErr: S.mfmt === 'hex' ? 'Fix the hex first: pairs of 0–9 and a–f.' : 'Fix the base64 first.' });
-    const out = fromBytes(bytes, k);
+    const out = bytesToText(bytes, k);
     if (out === null) return set({ msgErr: 'These bytes are not readable text. Keep them as hex or base64.' });
     set({ mfmt: k, msg: out, msgErr: '', res: null });
   };
@@ -449,7 +417,7 @@ export function SignVerify() {
       set({ sig, ae: false });
       addLog({ kind: 'msg', main: S.mfmt === 'text' ? S.msg.slice(0, 120) : S.mfmt + ' message · ' + bytes.length + ' bytes', address: R.address, alg: S.alg, prefill: { alg: S.alg, mfmt: S.mfmt, msg: S.msg, vfmt: 'b64', sig: base64.encode(sig), who: S.alg === 'ecdsa' ? R.address : xpk }, sel });
     } else {
-      const sig = sigDecode(S.vsig, S.vfmt);
+      const sig = textToBytes(S.vsig, S.vfmt);
       if (!sig) return set({ res: { ok: false, why: 'The signature isn’t valid ' + (S.vfmt === 'hex' ? 'hex' : 'base64') + '.' } });
       if (S.alg === 'ecdsa') set({ res: verifyMessageECDSA(who.trim(), bytes, sig) });
       else {
@@ -472,7 +440,7 @@ export function SignVerify() {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
             <span class="flabel">Signature type</span>
-            <div class="seg h34" style={{ gridTemplateColumns: '1fr 1fr', width: '200px' }}>{[['ecdsa', 'ECDSA'], ['schnorr', 'Schnorr']].map(([k, l]) => <button aria-pressed={S.alg === k ? 'true' : 'false'} class={S.alg === k ? 'on' : ''} onClick={() => set({ alg: k, who: null, sig: null, res: null })}>{l}</button>)}</div>
+            <div class="seg h34" style={{ gridTemplateColumns: '1fr 1fr', width: '200px' }}>{[['ecdsa', 'ECDSA'], ['schnorr', 'Schnorr']].map(([k, l]) => <button key={k} aria-pressed={S.alg === k ? 'true' : 'false'} class={S.alg === k ? 'on' : ''} onClick={() => set({ alg: k, who: null, sig: null, res: null })}>{l}</button>)}</div>
           </div>
           {!isSign && <InField id="cr-who" label={S.alg === 'ecdsa' ? 'Address' : 'Public key (x-only, hex)'} value={who} onInput={(v) => set({ who: v, res: null })} note={S.alg === 'ecdsa' ? 'Prefilled with this address. Paste another to check someone else’s signature.' : 'Prefilled with this address’s key. Paste the signer’s key to check theirs.'} />}
           <InField id="cr-msg" label="Message" textarea mono={S.mfmt !== 'text'} value={S.msg} onInput={(v) => set({ msg: v, msgErr: '', sig: null, res: null })} placeholder={{ text: 'Type the message', hex: '48656c6c6f…', b64: 'SGVsbG8…' }[S.mfmt]} bad={!!(S.msgErr || msgBad)} note={msgNote} noteCls={S.msgErr || msgBad ? 'err' : ''}
@@ -482,7 +450,7 @@ export function SignVerify() {
               <InField id="cr-sig" label="Signature" textarea value={S.vsig} onInput={(v) => set({ vsig: v, res: null })} right={<Chips label="Signature format" items={[['hex', 'Hex'], ['b64', 'Base64']]} value={S.vfmt} onChange={(k) => set({ vfmt: k, res: null })} />} />
               <div class="resultbox" style={{ border: res ? (res.ok ? '2px solid var(--ok)' : '2px solid var(--danger)') : '1px dashed var(--line2)' }}>
                 <b style={{ color: res ? (res.ok ? 'var(--ok)' : 'var(--danger)') : 'var(--muted)' }}>{res ? (res.ok ? 'Valid ' + (S.alg === 'ecdsa' ? 'ECDSA' : 'Schnorr') + ' signature' : 'Not valid') : 'Not checked yet'}</b>
-                <span class="small">{res ? (res.ok ? (S.alg === 'ecdsa' ? 'Signed by the key of this address' + (res.type && res.type !== decodeAddrType(who) ? '' : '') + '. The message is exactly as signed.' : 'Signed by this public key. The message is exactly as signed.') : res.why && res.why !== 'mismatch' ? res.why : 'The signature doesn’t match this message and ' + (S.alg === 'ecdsa' ? 'address' : 'key') + '. Check the signature type and that the message format is the one that was signed.') : 'Click Verify. Works offline, no private key needed.'}</span>
+                <span class="small">{res ? (res.ok ? (S.alg === 'ecdsa' ? 'Signed by the key of this address. The message is exactly as signed.' : 'Signed by this public key. The message is exactly as signed.') : res.why && res.why !== 'mismatch' ? res.why : 'The signature doesn’t match this message and ' + (S.alg === 'ecdsa' ? 'address' : 'key') + '. Check the signature type and that the message format is the one that was signed.') : 'Click Verify. Works offline, no private key needed.'}</span>
               </div>
             </>
           )}
@@ -500,11 +468,10 @@ export function SignVerify() {
         <div class="btnrow">
           <button class="btn-primary" disabled={msgBad} onClick={run}>{S.sig ? 'Sign again' : 'Sign message'}</button>
           <button class="btn-secondary bold" disabled={msgBad} title="The host adds its own randomness to the nonce, so this signer can’t leak your key through the signature"
-            onClick={() => startMessageAntiExfil({ alg: S.alg, priv: R.priv, type: R.type, bytes, mfmt: S.mfmt, msg: S.msg, address: R.address, xpk, sel,
+            onClick={() => startMessageAntiExfil({ alg: S.alg, type: R.type, bytes, mfmt: S.mfmt, msg: S.msg, address: R.address, xpk, sel,
               label: sel.keyIdx !== undefined ? R.key.label || 'Key' : (sel.branch ? 'Change' : 'Receive') + ' #' + sel.i })}>Anti-exfil signing</button>
         </div>
       ) : <button class="btn-primary" disabled={msgBad} onClick={run}>Verify</button>}
     </NavShell>
   );
 }
-function decodeAddrType(a) { try { return decodeAddress(a).type; } catch (e) { return null; } }

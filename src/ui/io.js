@@ -1,7 +1,7 @@
 // Browser I/O: QR rendering and decoding, webcam frames, clipboard, file downloads and reads.
 import encodeQR from 'qr';
 import decodeQR from 'qr/decode.js';
-import { hex } from '../core/util.js';
+import { bytesOrBin } from '../core/encoding.js';
 
 /** QR as a boolean matrix. Alphanumeric-friendly payloads (UR, BBQr, Base43) use uppercase. */
 export function qrMatrix(text, { ecc = 'low', numeric = false } = {}) {
@@ -89,13 +89,9 @@ export function pickFile(accept) {
 }
 export async function fileBytes(file) { return new Uint8Array(await file.arrayBuffer()); }
 
-/** Decoder that keeps binary QR payloads (e.g. Compact SeedQR) as "BIN:<hex>". */
-const textDecoder = (bytes) => {
-  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch (e) { return 'BIN:' + hex.encode(bytes); }
-};
-
+/** Binary QR payloads (e.g. Compact SeedQR) come back as "BIN:<hex>". */
 export function decodeImageData(img) {
-  try { return decodeQR({ width: img.width, height: img.height, data: img.data }, { textDecoder }); } catch (e) { return null; }
+  try { return decodeQR({ width: img.width, height: img.height, data: img.data }, { textDecoder: bytesOrBin }); } catch (e) { return null; }
 }
 
 export async function decodeImageFile(file) {

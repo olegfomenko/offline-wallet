@@ -39,7 +39,6 @@ export function useStore() {
 
 export function resetAll() {
   closeWallet(state.wallet);
-  if (state.tx && state.tx.tx) state.tx = {};
   state = initial();
   for (const f of subs) f();
 }

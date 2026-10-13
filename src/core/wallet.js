@@ -1,6 +1,6 @@
 // The in-memory wallet. Four kinds: BIP39 seed, custom (non-BIP39) words, extended private key, single keys.
 // Nothing is ever persisted; closeWallet() wipes what JavaScript lets us wipe.
-import { mnemonicToSeedSync, validateMnemonic, entropyToMnemonic, mnemonicToEntropy } from '@scure/bip39';
+import { mnemonicToSeedSync, validateMnemonic, entropyToMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { pbkdf2 } from '@noble/hashes/pbkdf2.js';
 import { sha512 } from '@noble/hashes/sha2.js';
@@ -118,9 +118,6 @@ export function fingerprintWith(src, passphrase = '') {
   return fp;
 }
 
-export function isHD(w) { return w && w.kind !== 'keys'; }
-export function hasRoot(w) { return !!(w && w.root); }
-
 /**
  * Account node for an address type. For seed-like wallets any path works; for an account-level xprv
  * the key itself is the account (path is fixed).
@@ -152,11 +149,6 @@ export function accountKeys(w, type, net, acct, customPath, priv = false) {
 export function addressAt(A, type, net, branch, index) {
   const child = A.node.deriveChild(branch).deriveChild(index);
   return { address: addressOf(type, child.publicKey, net), pub: child.publicKey, node: child, path: A.path + '/' + branch + '/' + index };
-}
-
-export function seedSummary(w) {
-  if (w.kind === 'seed') return { label: 'Seed words', words: w.words };
-  return null;
 }
 
 export function closeWallet(w) {
@@ -196,7 +188,6 @@ export function lastWordCandidates(words) {
 }
 
 export function mnemonicFromEntropy(ent) { return entropyToMnemonic(ent, wordlist).split(' '); }
-export function entropyFromWords(words) { return mnemonicToEntropy(words.join(' '), wordlist); }
 
 /** SeedQR (SeedSigner): standard = 4-digit word indexes; compact = raw entropy bytes. */
 export function seedQREncode(words) { return words.map((w) => String(wordIndex(w)).padStart(4, '0')).join(''); }

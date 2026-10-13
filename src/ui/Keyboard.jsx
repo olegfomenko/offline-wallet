@@ -176,12 +176,12 @@ function Panel({ kb, T }) {
         </div>
         {seed && (
           <div class="kbd-sugg">
-            {sugg.map((w) => <button type="button" class={w === cur ? 'exact' : ''} onPointerDown={noFocus} onClick={() => pick(w)}>{w}</button>)}
+            {sugg.map((w) => <button key={w} type="button" class={w === cur ? 'exact' : ''} onPointerDown={noFocus} onClick={() => pick(w)}>{w}</button>)}
             {!sugg.length && <span class="hint">{cur ? 'No BIP39 word starts with “' + cur + '”.' : 'Words appear here as you type. Letters that can’t start a BIP39 word are dimmed.'}</span>}
           </div>
         )}
         <div class="kbd-rows">
-          {rows.map((r) => <div class="kbd-row">{r}</div>)}
+          {rows.map((r, k) => <div key={k} class="kbd-row">{r}</div>)}
           <div class="kbd-row">{bottom}</div>
         </div>
       </div>

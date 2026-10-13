@@ -4,20 +4,17 @@ import { expect } from './expect.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as btc from '@scure/btc-signer';
-import { HDKey } from '@scure/bip32';
 import { hex, utf8, base64 } from '../src/core/util.js';
-import { descChecksum, parseDescriptor, parseExt, serializeExt, addressOf, decodeAddress, withChecksum, TYPES } from '../src/core/hd.js';
+import { descChecksum, parseDescriptor, serializeExt, addressOf, withChecksum, TYPES } from '../src/core/hd.js';
 import { walletFromMnemonic, walletFromCustom, fingerprintWith, readXkey, walletFromXkey, walletFromKeys, accountKeys, account, addressAt, lastWordCandidates, isValidMnemonic, seedQREncode, seedQRDecode, customSeedText } from '../src/core/wallet.js';
-import { decodeWIF, encodeWIF, parseKeyLine, decryptBIP38, pubOf, keyAddress, looksExtended, ELECTRUM_PREFIX } from '../src/core/keys.js';
+import { encodeWIF, parseKeyLine, decryptBIP38, pubOf, keyAddress, looksExtended, ELECTRUM_PREFIX } from '../src/core/keys.js';
 import { makeEntropy, countedBits, neededBits } from '../src/core/entropy.js';
 import { signMessageECDSA, verifyMessageECDSA, signMessageSchnorr, verifyMessageSchnorr } from '../src/core/message.js';
 import { base43, BBQrDecoder, bbqrSplit, classify, MultiPartCollector, psbtQRFrames } from '../src/core/transport.js';
 import { parsePsbt, analyzePsbt, signPsbt, psbtJSON, prepareAntiExfil, antiExfilNonces, signPsbtAntiExfil } from '../src/core/psbt.js';
 import { hostCommitment, hostVerifyECDSA, hostVerifySchnorr } from '../src/core/antiexfil.js';
 import { secp256k1, schnorr } from '@noble/curves/secp256k1.js';
-
-const ABANDON = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'.split(' ');
-const W = walletFromMnemonic(ABANDON, '');
+import { ABANDON, W, buildPsbt } from './psbt-fixture.js';
 
 test('BIP39/BIP32 fingerprint and standard addresses (BIP44/49/84/86 vectors)', () => {
   expect(W.fp).toBe('73C5DA0A');
@@ -180,64 +177,7 @@ test('classify detects formats', () => {
   expect(hex.encode(new Uint8Array(r.payload.ur.cbor).slice(-10))).toBe(hex.encode(psbt.slice(-10)));
 });
 
-// ---- PSBT end to end ----
-function fakePrevTx(script, amount) {
-  return btc.RawTx.decode(btc.RawTx.encode({
-    version: 2, segwitFlag: false,
-    inputs: [{ txid: new Uint8Array(32).fill(7), index: 0, finalScriptSig: new Uint8Array(), sequence: 0xffffffff }],
-    outputs: [{ amount: 1000n, script: new Uint8Array([0x6a]) }, { amount, script }],
-    witnesses: [], lockTime: 0,
-  }));
-}
-function txidOf(raw) { return btc.Transaction.fromRaw(btc.RawTx.encode(raw), { allowUnknownOutputs: true }).id; }
-
-function buildPsbt({ type = 'wpkh', full = true, sighash, fee = 2571n, extOut = 1500000n, selfOut = false, lockTime = 0, chgAcct = 0 } = {}) {
-  const net = 'main';
-  const A = account(W, type, net, 0);
-  const inA = addressAt(A, type, net, 0, 5);
-  const chg = addressAt(account(W, type, net, chgAcct), type, net, 1, 3);
-  const pay = btc.p2wpkh(pubOf(new Uint8Array(32).fill(9)));
-  const inAmount = 10000000n;
-  const p = (() => {
-    const N = btc.NETWORK;
-    if (type === 'wpkh') return btc.p2wpkh(inA.pub, N);
-    if (type === 'tr') return btc.p2tr(inA.pub.subarray(1), undefined, N);
-    if (type === 'pkh') return btc.p2pkh(inA.pub, N);
-    return btc.p2sh(btc.p2wpkh(inA.pub, N), N);
-  })();
-  const prev = fakePrevTx(p.script, inAmount);
-  const tx = new btc.Transaction({ lockTime, allowUnknownOutputs: true });
-  const path = [84, 0, 0].map((x) => x + 0x80000000);
-  const purpose = { wpkh: 84, tr: 86, pkh: 44, shwpkh: 49 }[type];
-  path[0] = purpose + 0x80000000;
-  const inp = { txid: txidOf(prev), index: 1, sequence: 0xfffffffd, witnessUtxo: { script: p.script, amount: inAmount } };
-  if (full && type !== 'tr') inp.nonWitnessUtxo = prev;
-  if (type === 'pkh') delete inp.witnessUtxo;
-  if (type === 'shwpkh') inp.redeemScript = p.redeemScript;
-  if (type === 'tr') { inp.tapInternalKey = inA.pub.subarray(1); inp.tapBip32Derivation = [[inA.pub.subarray(1), { hashes: [], der: { fingerprint: W.root.fingerprint, path: [...path, 0, 5] } }]]; }
-  else inp.bip32Derivation = [[inA.pub, { fingerprint: W.root.fingerprint, path: [...path, 0, 5] }]];
-  if (sighash !== undefined) inp.sighashType = sighash;
-  tx.addInput(inp);
-  tx.addOutput({ script: pay.script, amount: extOut });
-  const chgAmount = inAmount - extOut - fee;
-  const outChg = { script: payOf(type, chg.pub).script, amount: chgAmount };
-  if (type === 'tr') { outChg.tapInternalKey = chg.pub.subarray(1); outChg.tapBip32Derivation = [[chg.pub.subarray(1), { hashes: [], der: { fingerprint: W.root.fingerprint, path: [path[0], path[1], 0x80000000 + chgAcct, 1, 3] } }]]; }
-  else outChg.bip32Derivation = [[chg.pub, { fingerprint: W.root.fingerprint, path: [path[0], path[1], 0x80000000 + chgAcct, 1, 3] }]];
-  tx.addOutput(outChg);
-  if (selfOut) {
-    const r = addressAt(A, type, net, 0, 1);
-    tx.addOutput({ script: payOf(type, r.pub).script, amount: 1000n, bip32Derivation: type === 'tr' ? undefined : [[r.pub, { fingerprint: W.root.fingerprint, path: [...path, 0, 1] }]] });
-  }
-  return tx.toPSBT();
-}
-function payOf(type, pub) {
-  const N = btc.NETWORK;
-  if (type === 'wpkh') return btc.p2wpkh(pub, N);
-  if (type === 'tr') return btc.p2tr(pub.subarray(1), undefined, N);
-  if (type === 'pkh') return btc.p2pkh(pub, N);
-  return btc.p2sh(btc.p2wpkh(pub, N), N);
-}
-
+// ---- PSBT end to end (buildPsbt in psbt-fixture.js) ----
 for (const type of ['wpkh', 'tr', 'pkh', 'shwpkh']) {
   test('PSBT analyze + sign + finalize: ' + type, () => {
     const tx = parsePsbt(buildPsbt({ type }));
@@ -249,6 +189,11 @@ for (const type of ['wpkh', 'tr', 'pkh', 'shwpkh']) {
     expect(a.fee).toBe(2571n);
     expect(a.outputs[1].kind).toBe('change');
     expect(a.outputs[0].kind).toBe('external');
+    // The analysis names the keys (path, fingerprint) but never holds them: it goes into the log.
+    for (const own of [a.inputs[0].own, a.outputs[1].own]) {
+      expect(own.node).toBe(undefined); expect(own.priv).toBe(undefined);
+      expect(own.pathArr.length).toBe(5); expect(own.fpNum).toBe(W.root.fingerprint);
+    }
     const r = signPsbt(tx, a, W);
     expect(r.final).toBe(true);
     expect(r.txHex.length).toBeGreaterThan(100);
@@ -261,7 +206,7 @@ for (const type of ['wpkh', 'tr', 'pkh', 'shwpkh']) {
 function aeCheck(psbtBytes, n) {
   const tx = parsePsbt(psbtBytes);
   const a = analyzePsbt(tx, W, { net: 'main' });
-  const prep = prepareAntiExfil(tx, a);
+  const prep = prepareAntiExfil(tx, a, W);
   expect(prep.items.length).toBe(n);
   const plain = parsePsbt(signPsbt(tx, a, W).psbt);
   for (const it of prep.items) {
@@ -282,7 +227,7 @@ function aeCheck(psbtBytes, n) {
     expect(hex.encode(r.nonces[i].R)).toBe(hex.encode(Rs[i]));
   });
   // Wrong data for one input: nothing is signed.
-  const prep2 = prepareAntiExfil(tx, a);
+  const prep2 = prepareAntiExfil(tx, a, W);
   const bad = datas.slice(); bad[n - 1] = utf8.encode('not what was committed');
   expect(() => signPsbtAntiExfil(prep2, coms, bad)).toThrow(/doesn’t match/);
   expect(prep2.t.getInput(prep2.items[0].idx).partialSig || prep2.t.getInput(prep2.items[0].idx).tapKeySig).toBe(undefined);
@@ -362,6 +307,10 @@ test('PSBT protections found in review (audit regressions)', () => {
   const before = hex.encode(tx.toPSBT());
   expect(() => signPsbt(tx, analyzePsbt(tx, W), W)).toThrow();
   expect(hex.encode(tx.toPSBT())).toBe(before);
+  // an analysis from one wallet can't sign with another: the key is re-derived and checked
+  const clean = parsePsbt(buildPsbt({}));
+  const other = walletFromMnemonic(ABANDON, 'passphrase');
+  expect(() => signPsbt(clean, analyzePsbt(clean, W), other)).toThrow(/not in the open wallet/);
 });
 
 test('every private-key export restores to the same address (restore from a private key)', () => {

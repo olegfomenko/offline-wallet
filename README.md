@@ -1,7 +1,7 @@
 # Offline Signer
 
 An offline, single-sig Bitcoin signer that compiles to **one self-contained HTML file**
-(`offline-signer.html`, about 460 KB), published at
+(`offline-signer.html`, about 500 KB), published at
 <https://olegfomenko.github.io/offline-wallet/>. Download it, then open it from a USB stick on a
 computer that never goes online. It creates or restores a wallet, exports the xpub or descriptor to a watch-only wallet, and
 signs PSBTs that arrive by QR, text or file. Nothing is saved: the wallet lives only in the open tab.
@@ -125,7 +125,8 @@ EntropyLab uses as test oracles.
 The UI is Preact 10. No other code runs. The build fails if the bundle contains `fetch`,
 `XMLHttpRequest`, `WebSocket`, `EventSource`, `sendBeacon`, `RTCPeerConnection` or
 `importScripts`. The CSP (`connect-src 'none'`, `default-src 'none'`) blocks network access in any
-case.
+case, and its `script-src` names the one inline script by its SHA-256 hash (filled in by the build),
+so no other script, inline or injected, can run on the page.
 
 ## Build
 
@@ -182,12 +183,14 @@ Never send funds to that seed.
 ```
 src/core/   wallet, hd (paths, SLIP-132, descriptors), keys (WIF, BIP38), entropy, message,
             psbt (review and signing), antiexfil (host-committed nonces), calc (SHA and secp256k1
-            calculators), transport (formats, BBQr, Base43, pMofN), ur, search
+            calculators), transport (formats, BBQr, Base43, pMofN), ur, search,
+            encoding (text ↔ hex/Base64/UTF-8 bytes), util
 src/ui/     store (in-memory state), router, kit (value-field pattern), sheet (export/import),
-            io (QR, webcam, clipboard, files), kbd + Keyboard (on-screen keyboard), screens/*
+            io (QR, webcam, clipboard, files), kbd + Keyboard (on-screen keyboard),
+            account (selected account and address → keys), screens/*
 scripts/    build.mjs, node-hooks.mjs (test import mapping), vendor.sh
 vendor/     pinned third-party sources (VENDORED.md)
-test/       node:test tests, fixtures
+test/       node:test tests, psbt-fixture (sample PSBT builder), fixtures in data/
 ```
 
 ## Known limits

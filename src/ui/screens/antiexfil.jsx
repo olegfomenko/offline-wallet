@@ -1,15 +1,20 @@
 // Anti-exfil signing, for messages (from Sign or verify) and transactions (from Review).
 // Host commitment → signer nonce R → host data → final nonce → sign. See core/antiexfil.js.
+//
+// Keys: a message is signed with the key of the selected address, re-derived from the wallet when
+// needed and never stored. A transaction keeps its prepared copy (with fresh key copies) in the
+// store while the flow runs, and wipes them when the screen is left in any way.
 import { h, Fragment } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import { go } from '../router.js';
 import { getState, setState, patch, useStore, addLog } from '../store.js';
 import { NavShell, TitleRow, Seg, OutField, InField, fmtAmt, shortAddr } from '../kit.jsx';
-import { toBytes, fromBytes } from './addresses.jsx';
+import { resolveSel } from '../account.js';
+import { textToBytes, bytesToText } from '../../core/encoding.js';
 import { messageSignerNonce, signMessageAntiExfil } from '../../core/message.js';
-import { prepareAntiExfil, antiExfilNonces, signPsbtAntiExfil, psbtJSON } from '../../core/psbt.js';
+import { prepareAntiExfil, wipeAntiExfil, antiExfilNonces, signPsbtAntiExfil, psbtJSON } from '../../core/psbt.js';
 import { finalNonce, dataMatches } from '../../core/antiexfil.js';
-import { hex, base64, wipe } from '../../core/util.js';
+import { hex, base64 } from '../../core/util.js';
 
 const STEPS = {
   1: ['Host commitment', 'The host (your online wallet or a second device) picks random data and gives you only its SHA-256. You enter that hash here before seeing anything from this signer.'],
@@ -19,7 +24,7 @@ const STEPS = {
 };
 const ALG_NAME = { ecdsa: 'ECDSA', schnorr: 'Schnorr (BIP340)' };
 
-/** Open anti-exfil signing for a message. `m` = { alg, priv, type, bytes, mfmt, msg, label, address, xpk, sel }. */
+/** Open anti-exfil signing for a message. `m` = { alg, type, bytes, mfmt, msg, label, address, xpk, sel }. */
 export function startMessageAntiExfil(m) {
   setState({ ae: { kind: 'msg', ...m } });
   go('anti-exfil-msg');
@@ -27,13 +32,14 @@ export function startMessageAntiExfil(m) {
 
 /** Open anti-exfil signing for the reviewed transaction. Throws if it can't be signed. */
 export function startTxAntiExfil() {
-  const { tx } = getState();
-  const prep = prepareAntiExfil(tx.txObj, tx.analysis);
+  const { tx, wallet } = getState();
+  const prep = prepareAntiExfil(tx.txObj, tx.analysis, wallet);
   setState({ ae: { kind: 'tx', prep } });
   go('anti-exfil');
 }
 
 function leave(to) {
+  wipeAntiExfil(getState().ae && getState().ae.prep);
   setState({ ae: null });
   go(to);
 }
@@ -41,7 +47,7 @@ function leave(to) {
 const comBytes = (s, fmt) => {
   const t = String(s || '').replace(/\s+/g, '');
   if (!t) return null;
-  const b = toBytes(t, fmt);
+  const b = textToBytes(t, fmt);
   return b && b.length === 32 ? b : null;
 };
 
@@ -50,17 +56,18 @@ export function AntiExfil() {
   const ae = st.ae;
   const [S, set0] = useState({ step: 1, comFmt: 'hex', dataFmt: 'text', com: [], data: [], err: '' });
   const set = (p) => set0((s) => ({ ...s, ...p }));
-  // Leaving this screen in any way forgets the prepared keys (the tweaked Taproot keys are copies).
+  // Leaving this screen in any way (menu, back, reload) forgets the prepared keys.
   useEffect(() => () => {
     const a = getState().ae;
-    if (a && a.prep) for (const it of a.prep.items) if (it.alg === 'schnorr') wipe(it.key);
-    if (a) setState({ ae: null });
+    if (a) { wipeAntiExfil(a.prep); setState({ ae: null }); }
   }, []);
   if (!ae) { go(st.tx && st.tx.analysis ? 'review' : 'main'); return null; }
   const isTx = ae.kind === 'tx';
   const back = isTx ? 'review' : 'sign-verify';
   const unit = st.settings.unit;
   const step = S.step;
+  // The message key, re-derived from the wallet each time it is needed.
+  const msgPriv = () => resolveSel(st.wallet, ae.sel, st.settings.net).priv;
 
   // One nonce per input of this wallet; a message has one.
   const items = isTx
@@ -71,7 +78,7 @@ export function AntiExfil() {
   const pad = (a) => { const o = (a || []).slice(); while (o.length < N) o.push(''); return o; };
   const com = pad(S.com), data = pad(S.data);
   const comB = com.map((c) => comBytes(c, S.comFmt));
-  const dataB = data.map((d) => (d === '' ? null : toBytes(d, S.dataFmt)));
+  const dataB = data.map((d) => (d === '' ? null : textToBytes(d, S.dataFmt)));
   const match = dataB.map((d, i) => dataMatches(d, comB[i]));
   const ok1 = comB.every(Boolean), ok3 = match.every(Boolean);
 
@@ -80,7 +87,7 @@ export function AntiExfil() {
   let rErr = '';
   if (step >= 2 && ok1) {
     try {
-      R = isTx ? antiExfilNonces(ae.prep, comB) : [messageSignerNonce(ae.alg, ae.priv, ae.bytes, comB[0])];
+      R = isTx ? antiExfilNonces(ae.prep, comB) : [messageSignerNonce(ae.alg, msgPriv(), ae.bytes, comB[0])];
     } catch (e) { rErr = e.message; }
   }
   const fin = step === 4 && ok3 && R.length ? R.map((r, i) => finalNonce(r, dataB[i])) : [];
@@ -90,22 +97,22 @@ export function AntiExfil() {
   // A file or QR may bring raw bytes: a 32-byte commitment, or binary host data.
   const comFromImport = (i, v) => {
     if (v instanceof Uint8Array) {
-      if (v.length === 32) return setCom(i, fromBytes(v, S.comFmt));
+      if (v.length === 32) return setCom(i, bytesToText(v, S.comFmt));
       v = new TextDecoder().decode(v);
     }
     setCom(i, String(v).trim());
   };
   const dataFromImport = (i, v) => {
     if (!(v instanceof Uint8Array)) return setData(i, String(v));
-    const asFmt = fromBytes(v, S.dataFmt);
+    const asFmt = bytesToText(v, S.dataFmt);
     if (asFmt !== null) return setData(i, asFmt);
     const n = data.map((d, j) => (j === i ? hex.encode(v) : dataB[j] ? hex.encode(dataB[j]) : d));
     set({ dataFmt: 'hex', data: n, err: '' });
   };
-  const switchCom = (k) => set({ comFmt: k, com: com.map((c, i) => (comB[i] ? fromBytes(comB[i], k) : c)) });
+  const switchCom = (k) => set({ comFmt: k, com: com.map((c, i) => (comB[i] ? bytesToText(comB[i], k) : c)) });
   const switchData = (k) => {
     if (k === S.dataFmt) return;
-    const out = data.map((d, i) => (dataB[i] ? fromBytes(dataB[i], k) : d));
+    const out = data.map((d, i) => (dataB[i] ? bytesToText(dataB[i], k) : d));
     if (out.some((x, i) => dataB[i] && x === null)) return set({ err: 'This data isn’t readable text. Keep it as hex or Base64.' });
     set({ dataFmt: k, data: out, err: '' });
   };
@@ -123,7 +130,7 @@ export function AntiExfil() {
         patch('tx', { signed: res, json });
         leave('signed-export');
       } else {
-        const r = signMessageAntiExfil(ae.alg, ae.priv, ae.bytes, ae.type, comB[0], dataB[0]);
+        const r = signMessageAntiExfil(ae.alg, msgPriv(), ae.bytes, ae.type, comB[0], dataB[0]);
         addLog({ kind: 'msg', main: ae.mfmt === 'text' ? ae.msg.slice(0, 120) : ae.mfmt + ' message · ' + ae.bytes.length + ' bytes', address: ae.address, alg: ae.alg, ae: true,
           prefill: { alg: ae.alg, mfmt: ae.mfmt, msg: ae.msg, vfmt: 'b64', sig: base64.encode(r.sig), who: ae.alg === 'ecdsa' ? ae.address : ae.xpk }, sel: ae.sel });
         setState({ sigDone: { alg: ae.alg, mfmt: ae.mfmt, msg: ae.msg, sig: r.sig, ae: true } });
@@ -179,7 +186,7 @@ export function AntiExfil() {
     <NavShell max={760} gap={18}>
       <TitleRow onBack={() => (step === 1 ? leave(back) : set({ step: step - 1, data: step === 2 ? [] : S.data, err: '' }))} title="Anti-exfil signing"
         right={<span class="small" style={{ fontSize: '14px', flexShrink: 0 }}>Step {step} of 4</span>} />
-      <div class="steps">{[1, 2, 3, 4].map((k) => <span class={k <= step ? 'on' : ''} />)}</div>
+      <div class="steps">{[1, 2, 3, 4].map((k) => <span key={k} class={k <= step ? 'on' : ''} />)}</div>
       <div class="aesum">
         <span>Signing <b>{what}</b></span>
         <span>Signature <b>{algs.map((x) => ALG_NAME[x]).join(' + ')}</b></span>
@@ -201,7 +208,7 @@ export function AntiExfil() {
           <Seg items={[['text', 'Text'], ['hex', 'Hex'], ['b64', 'Base64']]} value={S.dataFmt} labelledBy="ae-df" onChange={switchData} />
         </div>
       )}
-      {items.map(field)}
+      {items.map((it, i) => <Fragment key={it.n}>{field(it, i)}</Fragment>)}
       {rErr && <span class="note err">{rErr}</span>}
       {step === 2 && <div class="aewarn warn"><b>!</b><span>Send R before the host reveals its data. Going back to step 1 with a new commitment gives a new R; a host that asks for that repeatedly is suspicious.</span></div>}
       {step === 4 && <div class="aewarn"><b>!</b><span>If signing fails, retry with the same data. Don’t start over with new data: a faulty signer could keep failing until it gets a nonce it likes.</span></div>}

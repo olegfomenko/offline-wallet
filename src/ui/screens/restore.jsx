@@ -3,11 +3,11 @@ import { h, Fragment } from 'preact';
 import { useState, useMemo } from 'preact/hooks';
 import { go } from '../router.js';
 import { getState, setState, patch, useStore } from '../store.js';
-import { FlowShell, TitleRow, StepRow, Seg, Spacer, OutField, ExportBtn, PrivChip, InField, HiddenInField, ImportBtn, I, Card } from '../kit.jsx';
+import { FlowShell, TitleRow, Seg, Spacer, OutField, ExportBtn, PrivChip, InField, HiddenInField, ImportBtn, I } from '../kit.jsx';
 import { Keyboard, KbdButton, useKbd } from '../Keyboard.jsx';
 import { firstEmpty } from '../kbd.js';
 import { WORDSET, normalizeWords, isValidMnemonic, walletFromCustom, readXkey, walletFromXkey, walletFromKeys, account, addressAt, seedQRDecode, compactSeedQRDecode, customSeedText } from '../../core/wallet.js';
-import { parseKeyLine, looksExtended, decryptBIP38, keyAddress, encodeWIF, pubOf, ELECTRUM_PREFIX } from '../../core/keys.js';
+import { parseKeyLine, looksExtended, decryptBIP38, keyAddress, ELECTRUM_PREFIX } from '../../core/keys.js';
 import { TYPES } from '../../core/hd.js';
 import { hex } from '../../core/util.js';
 
@@ -236,7 +236,7 @@ export function RestoreKey() {
       )}
       <div class="stack">
         <span class="caps s12">Accepted</span>
-        <div class="card">{A.map(([n, d]) => <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', padding: '8px 12px', borderTop: '1px solid var(--line)' }}><span class="mono" style={{ fontSize: '13px', minWidth: '110px' }}>{n}</span><span class="small">{d}</span></div>)}</div>
+        <div class="card">{A.map(([n, d]) => <div key={n} style={{ display: 'flex', alignItems: 'baseline', gap: '10px', padding: '8px 12px', borderTop: '1px solid var(--line)' }}><span class="mono" style={{ fontSize: '13px', minWidth: '110px' }}>{n}</span><span class="small">{d}</span></div>)}</div>
       </div>
       {err && <span class="note err">{err}</span>}
       <Spacer />
@@ -270,7 +270,7 @@ export function CheckMasterKey() {
       <TitleRow back="restore-key" title="Check master key" />
       <div class="stack14">
         <OutField label="Read from input" priv spec={{ title: 'Master key · as read', value: info.raw, file: 'master-key.txt' }} />
-        <div class="card">{facts.map(([k, v]) => <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', padding: '8px 12px', fontSize: '13px', borderTop: '1px solid var(--line)' }}><span class="muted">{k}</span><span>{v}</span></div>)}</div>
+        <div class="card">{facts.map(([k, v]) => <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', padding: '8px 12px', fontSize: '13px', borderTop: '1px solid var(--line)' }}><span class="muted">{k}</span><span>{v}</span></div>)}</div>
         {!info.type && (
           <div class="stack" style={{ gap: '8px' }}>
             <span class="small"><b style={{ color: 'var(--text)' }}>Choose the address type.</b> {root ? 'A master key works with every type. Pick the one your old wallet used; you can switch later on the Addresses screen.' : 'A plain xprv doesn’t say which addresses it made. Pick the one whose first address matches your old wallet.'}</span>
@@ -325,7 +325,7 @@ export function CheckSingleKeys() {
         // combo() covers Legacy, Nested and Native SegWit, not Taproot.
         const types = k.priv ? (!k.compressed ? ['pkh'] : k.kind === 'descriptor' ? ['wpkh', 'shwpkh', 'pkh'] : ['wpkh', 'shwpkh', 'pkh', 'tr']) : [];
         return (
-          <div class="stack14" style={{ padding: '14px', border: '1px solid var(--line)' }}>
+          <div key={i} class="stack14" style={{ padding: '14px', border: '1px solid var(--line)' }}>
             <span style={{ fontWeight: 600 }}>Key {i + 1} · {kindName(k)}</span>
             <OutField label={k.kind === 'bip38' ? 'Encrypted private key' : 'Private key'} priv spec={{ title: 'Key ' + (i + 1), value: k.source, file: 'key-' + (i + 1) + '.txt' }} />
             {k.kind === 'bip38' && !k.priv && (
@@ -352,7 +352,7 @@ export function CheckSingleKeys() {
                   const a = keyAddress(k, t, net);
                   const on = k.pick === t;
                   return (
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <div key={t} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                       <button aria-pressed={on ? 'true' : 'false'} onClick={() => up(i, { pick: t })} style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', alignItems: 'center', gap: '10px', padding: on ? '7px 9px' : '8px 10px', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer', border: on ? '2px solid #FFFFFF' : '1px solid var(--line)', textAlign: 'left' }}>
                         <span class={'radio' + (on ? ' on' : '')} />
                         <span style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}><span class="mono" style={{ fontSize: '13px', wordBreak: 'break-all' }}>{a}</span><span class="note">{TYPES[t].label} · {a.slice(0, 4)}…{t === 'pkh' ? ' · what Electrum assumes without a prefix' : TYPES[t].electrum ? ' · Electrum ' + TYPES[t].electrum + ':' : ''}</span></span>

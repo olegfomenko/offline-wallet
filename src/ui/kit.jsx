@@ -7,6 +7,7 @@ import { getState, setState, resetAll } from './store.js';
 import * as I from './icons.jsx';
 import { netStatus, onNetChange } from './net.js';
 import { KbdButton } from './Keyboard.jsx';
+import { MONTHS } from '../core/util.js';
 
 /** Network status as the browser reports it: 'offline', 'online' or 'unknown' (iPhone and iPad). */
 export function useNet() {
@@ -108,7 +109,7 @@ export function NavShell({ max = 1040, gap = 24, children }) {
         {w && <div class="walletchip"><span>{walletLabel(w)}</span><b>{w.kind === 'keys' ? w.keys.length + ' key' + (w.keys.length > 1 ? 's' : '') : w.fp}</b></div>}
         <div class="navlist">
           {NAV.map(([id, label, Icon, group]) => (
-            <a href={'#/' + id} class={group.includes(route) ? 'on' : ''} aria-current={group.includes(route) ? 'page' : undefined} onClick={() => setOpen(false)}>
+            <a key={id} href={'#/' + id} class={group.includes(route) ? 'on' : ''} aria-current={group.includes(route) ? 'page' : undefined} onClick={() => setOpen(false)}>
               <span class="ic"><Icon /></span>{label}
             </a>
           ))}
@@ -154,21 +155,21 @@ export function StepRow({ back, onBack, step, of = 6, label }) {
 export function Seg({ items, value, onChange, cls = '', cols, labelledBy }) {
   return (
     <div class={'seg ' + cls} role="group" aria-labelledby={labelledBy} style={{ gridTemplateColumns: 'repeat(' + (cols || items.length) + ', minmax(0, 1fr))' }}>
-      {items.map(([id, label]) => <button type="button" aria-pressed={value === id ? 'true' : 'false'} class={value === id ? 'on' : ''} onClick={() => onChange(id)}>{label}</button>)}
+      {items.map(([id, label]) => <button key={id} type="button" aria-pressed={value === id ? 'true' : 'false'} class={value === id ? 'on' : ''} onClick={() => onChange(id)}>{label}</button>)}
     </div>
   );
 }
 export function Chips({ items, value, onChange, label }) {
   return (
     <div class="chips" role="group" aria-label={label}>
-      {items.map(([id, l]) => <button type="button" aria-pressed={value === id ? 'true' : 'false'} class={value === id ? 'on' : ''} onClick={() => onChange(id)}>{l}</button>)}
+      {items.map(([id, l]) => <button key={id} type="button" aria-pressed={value === id ? 'true' : 'false'} class={value === id ? 'on' : ''} onClick={() => onChange(id)}>{l}</button>)}
     </div>
   );
 }
 export function UTabs({ items, value, onChange, label }) {
   return (
     <div class="utabs" role="tablist" aria-label={label} style={{ gridTemplateColumns: 'repeat(' + items.length + ', minmax(0, 1fr))' }}>
-      {items.map(([id, l]) => <button role="tab" aria-selected={value === id ? 'true' : 'false'} class={value === id ? 'on' : ''} onClick={() => onChange(id)}>{l}</button>)}
+      {items.map(([id, l]) => <button key={id} role="tab" aria-selected={value === id ? 'true' : 'false'} class={value === id ? 'on' : ''} onClick={() => onChange(id)}>{l}</button>)}
     </div>
   );
 }
@@ -282,8 +283,7 @@ export function Addr({ a, chunks }) {
 export const shortAddr = (a, n = 8, m = 6) => (a && a.length > n + m + 1 ? a.slice(0, n) + '…' + a.slice(-m) : a);
 export const fmtTime = (t) => {
   const d = new Date(t);
-  const M = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return d.getDate() + ' ' + M[d.getMonth()] + ' ' + d.getFullYear() + ', ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  return d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear() + ', ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 };
 
 // ---- amounts ----
@@ -299,6 +299,5 @@ export function fmtAmt(sats, unit, withUnit = true) {
   else { s = (a / 100000000n).toString() + '.' + (a % 100000000n).toString().padStart(8, '0'); u = 'BTC'; }
   return (neg ? '−' : '') + s + (withUnit ? ' ' + u : '');
 }
-export const unitName = (unit) => ({ btc: 'BTC', mbtc: 'mBTC', bits: 'bits', sats: 'sats' }[unit]);
 
 export { I };

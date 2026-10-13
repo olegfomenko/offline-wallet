@@ -2,13 +2,13 @@
 import { h, Fragment } from 'preact';
 import { useState, useMemo, useRef, useEffect } from 'preact/hooks';
 import { go } from '../router.js';
-import { getState, setState, patch, useStore } from '../store.js';
-import { NavShell, TitleRow, Seg, Spacer, OutField, ExportBtn, PrivChip, InField, I, Card, walletLabel, fmtAmt } from '../kit.jsx';
+import { setState, patch, useStore } from '../store.js';
+import { NavShell, TitleRow, Seg, OutField, ExportBtn, PrivChip, InField, I, walletLabel, fmtAmt } from '../kit.jsx';
 import { SeedGrid, seedExportSpec } from './create.jsx';
 import { SeedCells, seedStats, wordsFromInput } from './restore.jsx';
 import { Keyboard, KbdButton, useKbd } from '../Keyboard.jsx';
 import { firstEmpty } from '../kbd.js';
-import { wordlist, lastWordCandidates, WORDSET } from '../../core/wallet.js';
+import { wordlist, lastWordCandidates } from '../../core/wallet.js';
 import { encodeWIF } from '../../core/keys.js';
 import { NETS, TYPES } from '../../core/hd.js';
 import { findAddress } from '../../core/search.js';
@@ -100,7 +100,7 @@ export function Seed() {
         </>
       )}
       {w.kind === 'keys' && w.keys.map((k, i) => (
-        <OutField label={(k.label || 'Key ' + (i + 1)) + ' · WIF · ' + TYPES[k.type].label} priv spec={{ title: (k.label || 'Key ' + (i + 1)) + ' · WIF', value: encodeWIF(k.priv, k.net === 'test' ? 'test' : 'main', k.compressed), file: 'key-' + (i + 1) + '-wif.txt' }} />
+        <OutField key={i} label={(k.label || 'Key ' + (i + 1)) + ' · WIF · ' + TYPES[k.type].label} priv spec={{ title: (k.label || 'Key ' + (i + 1)) + ' · WIF', value: encodeWIF(k.priv, k.net === 'test' ? 'test' : 'main', k.compressed), file: 'key-' + (i + 1) + '-wif.txt' }} />
       ))}
     </NavShell>
   );
@@ -111,7 +111,7 @@ export function Settings() {
   const hasPassphraseCheck = w && (w.kind === 'seed' || w.kind === 'custom');
   const un = settings.unit;
   const set = (p) => patch('settings', p);
-  const Link = ({ to, t, s, last }) => (
+  const Link = ({ to, t, s }) => (
     <a class="cardlink" href={'#/' + to} style={{ padding: '12px 16px' }}><span style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}><span style={{ fontSize: '15px' }}>{t}</span><span class="note">{s}</span></span><I.IChev /></a>
   );
   return (
@@ -184,11 +184,11 @@ export function WordList() {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
         <span class="note">Numbering</span>
-        {[[1, 'From 1'], [0, 'From 0']].map(([v, l]) => <button style={{ height: '32px', padding: '0 10px', background: 'transparent', font: '500 12px var(--sans)', cursor: 'pointer', border: from === v ? '1px solid #fff' : '1px solid var(--line)', color: from === v ? '#fff' : 'var(--muted)' }} aria-pressed={from === v ? 'true' : 'false'} onClick={() => setFrom(v)}>{l}</button>)}
+        {[[1, 'From 1'], [0, 'From 0']].map(([v, l]) => <button key={v} style={{ height: '32px', padding: '0 10px', background: 'transparent', font: '500 12px var(--sans)', cursor: 'pointer', border: from === v ? '1px solid #fff' : '1px solid var(--line)', color: from === v ? '#fff' : 'var(--muted)' }} aria-pressed={from === v ? 'true' : 'false'} onClick={() => setFrom(v)}>{l}</button>)}
       </div>
       <div class="card">
         <div class="wl-row" style={{ fontFamily: 'var(--sans)', fontSize: '12px', color: 'var(--muted)' }}><span>Dec</span><span>Word</span><span>Binary (11 bit)</span></div>
-        {shown.map((r) => <div class="wl-row"><span class="muted">{r.i + from}</span><span><b>{r.w.slice(0, 4)}</b><span class="tail">{r.w.slice(4)}</span></span><span class="muted">{r.i.toString(2).padStart(11, '0').replace(/(\d{3})(\d{4})(\d{4})/, '$1 $2 $3')}</span></div>)}
+        {shown.map((r) => <div key={r.i} class="wl-row"><span class="muted">{r.i + from}</span><span><b>{r.w.slice(0, 4)}</b><span class="tail">{r.w.slice(4)}</span></span><span class="muted">{r.i.toString(2).padStart(11, '0').replace(/(\d{3})(\d{4})(\d{4})/, '$1 $2 $3')}</span></div>)}
         {rows.length > shown.length && <div class="wl-row note">{rows.length - shown.length} more · refine the search</div>}
         {!rows.length && <div class="wl-row note">No word matches.</div>}
       </div>
@@ -237,7 +237,7 @@ export function LastWord() {
       {G.complete && (
         <div class="stack" style={{ gap: '8px' }}>
           <div class="secthead"><span class="caps s12">Valid last words</span><span class="note">{cands.length} options</span></div>
-          <div class="cand">{cands.map((c, i) => <button aria-pressed={pick === i ? 'true' : 'false'} class={pick === i ? 'on' : ''} onClick={() => setPick(i)}><small>{c.bits}</small><span>{c.word}</span></button>)}</div>
+          <div class="cand">{cands.map((c, i) => <button key={c.word} aria-pressed={pick === i ? 'true' : 'false'} class={pick === i ? 'on' : ''} onClick={() => setPick(i)}><small>{c.bits}</small><span>{c.word}</span></button>)}</div>
           <span class="note">{len === 12 ? 'With 12 words the last word carries 7 bits you choose and 4 checksum bits, so 128 words fit. Flip a coin 7 times to pick one: heads = 1, tails = 0.' : 'With 24 words the last word carries 3 bits you choose and 8 checksum bits, so 8 words fit. Flip a coin 3 times: heads = 1, tails = 0.'}</span>
         </div>
       )}

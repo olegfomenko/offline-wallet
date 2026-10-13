@@ -69,6 +69,8 @@ export function fpHex(n) {
   return (n >>> 0).toString(16).padStart(8, '0');
 }
 
+export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 /** Bitcoin CompactSize (varint) encoding. */
 export function varint(n) {
   if (n < 0xfd) return new Uint8Array([n]);

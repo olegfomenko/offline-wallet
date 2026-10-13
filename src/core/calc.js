@@ -2,7 +2,11 @@
 // All curve math is noble's (@noble/curves); this file only parses and formats.
 import { sha256, sha512 } from '@noble/hashes/sha2.js';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
-import { hex, base64, isHex, concat } from './util.js';
+import { bytesToNumberBE, numberToBytesBE } from '@noble/curves/utils.js';
+import { concat } from './util.js';
+import { decodeBytes, encodeBytes } from './encoding.js';
+
+export { decodeBytes, encodeBytes };
 
 export function digest(alg, bytes) {
   return alg === 'sha512' ? sha512(bytes) : sha256(bytes);
@@ -12,17 +16,7 @@ const Point = secp256k1.Point;
 export const N = Point.Fn.ORDER;
 export const G = Point.BASE;
 
-const toBig = (b) => { let v = 0n; for (const x of b) v = (v << 8n) | BigInt(x); return v; };
-const toBytesN = (v, len) => { const o = new Uint8Array(len); for (let i = len - 1; i >= 0; i--) { o[i] = Number(v & 255n); v >>= 8n; } return o; };
 const minLen = (n) => Math.max(1, Math.ceil(n.toString(16).length / 2));
-
-/** Text in hex or Base64 → bytes, or null. */
-export function decodeBytes(s, enc) {
-  const t = String(s || '').replace(/\s+/g, '');
-  if (enc === 'hex') return isHex(t) ? hex.decode(t) : null;
-  try { return base64.decode(t); } catch (e) { return null; }
-}
-export const encodeBytes = (b, enc) => (enc === 'hex' ? hex.encode(b) : base64.encode(b));
 
 /**
  * A number typed as decimal, hex (optional 0x) or Base64 (big-endian, no sign). Decimal and hex may
@@ -37,14 +31,13 @@ export function parseNum(s, enc) {
   if (enc === 'hex') { const h = a.replace(/^0x/i, ''); return /^[0-9a-fA-F]+$/.test(h) ? (neg ? -1n : 1n) * BigInt('0x' + h) : null; }
   if (neg) return null;
   const b = decodeBytes(v, 'b64');
-  return b && b.length ? toBig(b) : null;
+  return b && b.length ? bytesToNumberBE(b) : null;
 }
 /** Format a number like parseNum reads it. Base64 can't carry a sign, so negatives become n − |k|. */
 export function formatNum(n, enc) {
   if (n < 0n) return enc === 'b64' ? formatNum(((n % N) + N) % N, enc) : '-' + formatNum(-n, enc);
   if (enc === 'dec') return n.toString(10);
-  const b = toBytesN(n, minLen(n));
-  return enc === 'hex' ? hex.encode(b) : base64.encode(b);
+  return encodeBytes(numberToBytesBE(n, minLen(n)), enc);
 }
 export const modN = (k) => ((k % N) + N) % N;
 

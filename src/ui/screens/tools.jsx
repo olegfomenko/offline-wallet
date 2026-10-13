@@ -2,14 +2,15 @@
 import { h, Fragment } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
 import { useStore } from '../store.js';
-import { NavShell, TitleRow, Seg, Chips, InField, ImportBtn, ExportBtn, I } from '../kit.jsx';
+import { NavShell, TitleRow, Seg, Chips, InField, ImportBtn, ExportBtn } from '../kit.jsx';
 import { Keyboard, useKbd } from '../Keyboard.jsx';
 import { QR } from '../sheet.jsx';
 import { useFingerprint } from './create.jsx';
 import { qrMatrix, qrSvgPath, qrPngBlob, download } from '../io.js';
 import { textQRFrames } from '../../core/transport.js';
 import { utf8, hex } from '../../core/util.js';
-import { digest, decodeBytes, encodeBytes, parseNum, formatNum, modN, N, G, parsePoint, encodePoint, ecOp, yOdd } from '../../core/calc.js';
+import { decodeBytes, encodeBytes, textToBytes, bytesToText } from '../../core/encoding.js';
+import { digest, parseNum, formatNum, modN, N, G, parsePoint, encodePoint, ecOp, yOdd } from '../../core/calc.js';
 
 // ---------- Check passphrase ----------
 export function CheckPassphrase() {
@@ -144,13 +145,6 @@ export function TextQr() {
 }
 
 // ---------- shared bits for the calculators ----------
-const asText = (b) => { try { return new TextDecoder('utf-8', { fatal: true }).decode(b); } catch (e) { return null; } };
-function bytesIn(s, fmt) {
-  if (fmt === 'text') return utf8.encode(s);
-  return s.trim() === '' ? new Uint8Array(0) : decodeBytes(s, fmt);
-}
-function bytesOut(b, fmt) { return fmt === 'text' ? asText(b) : encodeBytes(b, fmt); }
-
 /** An output value with its label, format chips and an export button (none until there is a value). */
 function CalcOut({ label, meta, value, empty, chips, spec, note }) {
   return (
@@ -169,20 +163,20 @@ function CalcOut({ label, meta, value, empty, chips, spec, note }) {
 export function HashTool() {
   const [S, set0] = useState({ alg: 'sha256', inFmt: 'text', outFmt: 'hex', input: 'abc', err: '' });
   const set = (p) => set0((s) => ({ ...s, err: '', ...p }));
-  const bytes = bytesIn(S.input, S.inFmt);
+  const bytes = textToBytes(S.input, S.inFmt);
   const d = bytes ? digest(S.alg, bytes) : null;
   const name = S.alg === 'sha512' ? 'SHA-512' : 'SHA-256';
   const switchIn = (k) => {
     if (k === S.inFmt) return;
     if (!bytes) return set({ inFmt: k });
-    const out = bytesOut(bytes, k);
+    const out = bytesToText(bytes, k);
     if (out === null) return set({ err: 'These bytes aren’t readable text. Keep them as hex or Base64.' });
     set({ inFmt: k, input: out });
   };
   // A file brings raw bytes: keep the format if it can show them, else switch to hex.
   const fromImport = (v) => {
     if (!(v instanceof Uint8Array)) return set({ input: String(v) });
-    const out = bytesOut(v, S.inFmt);
+    const out = bytesToText(v, S.inFmt);
     out === null ? set({ inFmt: 'hex', input: hex.encode(v) }) : set({ input: out });
   };
   const encName = { text: 'text', hex: 'hex', b64: 'Base64' }[S.inFmt];
