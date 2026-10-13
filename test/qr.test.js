@@ -54,3 +54,36 @@ test('SeedQR (numeric mode) round trip', () => {
   const words = 'orbit canvas lunar ripple timber absorb velvet gravity harvest mosquito pledge salmon'.split(' ');
   expect(seedQRDecode(scan(seedQREncode(words), { encoding: 'numeric' }))).toEqual(words);
 });
+
+test('Text to QR: long text as BBQr, UR and numbered parts decodes back unchanged', async () => {
+  const { textQRFrames } = await import('../src/core/transport.js');
+  const { cbor } = await import('../src/core/ur.js');
+  const { utf8 } = await import('../src/core/util.js');
+  // Spaces at part edges, Cyrillic and an emoji: all must survive every format.
+  const text = 'Привет, мир! Bitcoin ₿ 😀 · '.repeat(200) + 'end  ';
+  // BBQr, file type U (UTF-8 text)
+  let m = textQRFrames(text, 'bbqr');
+  expect(m.frames.length).toBeGreaterThan(1);
+  expect(m.frames[0].slice(0, 4)).toBe('B$2U');
+  let c = new MultiPartCollector(), r;
+  for (const f of m.frames) r = c.receive(f);
+  expect(r.status).toBe('done');
+  expect(r.payload.bbqr.fileType).toBe('U');
+  expect(new TextDecoder().decode(r.payload.bbqr.bytes)).toBe(text);
+  // UR "bytes", fountain-coded: the original parts are enough
+  m = textQRFrames(text, 'ur');
+  c = new MultiPartCollector();
+  for (let k = 0; k < m.seqLen; k++) r = c.receive(m.next());
+  expect(r.status).toBe('done');
+  expect(r.payload.ur.type).toBe('bytes');
+  expect(new TextDecoder().decode(cbor.readBytes(r.payload.ur.cbor, 0).value)).toBe(text);
+  // Numbered pMofN parts
+  m = textQRFrames(text, 'split');
+  c = new MultiPartCollector();
+  for (const f of m.frames) r = c.receive(f);
+  expect(r.status).toBe('done');
+  expect(r.payload.text).toBe(text);
+  // Every frame fits one QR even at the highest error correction
+  for (const mode of ['bbqr', 'split']) for (const f of textQRFrames(text, mode).frames) encodeQR(f, 'raw', { ecc: 'high' });
+  expect(utf8.encode(text).length).toBeGreaterThan(2953);
+});

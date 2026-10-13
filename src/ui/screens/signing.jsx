@@ -2,7 +2,7 @@
 import { h, Fragment } from 'preact';
 import { useState, useEffect, useMemo } from 'preact/hooks';
 import { go } from '../router.js';
-import { getState, setState, patch, useStore, addLog, noteSeen, signNetOf } from '../store.js';
+import { getState, setState, patch, useStore, addLog, signNetOf } from '../store.js';
 import { NavShell, TitleRow, Seg, UTabs, Spacer, OutField, ExportBtn, InField, I, Card, Addr, fmtAmt, unitName, shortAddr, KV, Section } from '../kit.jsx';
 import { classify, classifyPayload, psbtQRFrames, base43 } from '../../core/transport.js';
 import { parsePsbt, analyzePsbt, signPsbt, psbtJSON, fmtPct, fmtRate, fmtDate } from '../../core/psbt.js';
@@ -239,14 +239,8 @@ export function Review() {
       const res = signPsbt(tx.txObj, a, w);
       const json = psbtJSON(tx.txObj, a);
       const ours = [...a.inputs.filter((x) => x.own).map((x) => x.address), ...a.outputs.filter((o) => o.own).map((o) => o.address)].filter(Boolean);
-      const theirs = a.outputs.filter((o) => o.kind === 'external' && o.address).map((o) => o.address);
       const snapshot = { analysis: a, json, signed: res, format: tx.format, source: tx.source };
       addLog({ kind: 'psbt', txid: res.txid, main: shortAddr(res.txid, 4, 5), ours, snapshot });
-      const typeOf = (x) => x.own && x.own.type;
-      noteSeen(
-        a.inputs.filter((x) => x.own).map((x) => ({ addr: x.address, type: typeOf(x), path: x.own.path })).concat(a.outputs.filter((o) => o.own).map((o) => ({ addr: o.address, type: o.own.type, path: o.own.path }))),
-        a.outputs.filter((o) => o.kind === 'external' && o.address).map((o) => ({ addr: o.address, scriptName: o.scriptName, txid: res.txid, snapshot })),
-      );
       patch('tx', { signed: res, json });
       go('signed-export');
     } catch (e) { setErr('Signing failed: ' + e.message); }

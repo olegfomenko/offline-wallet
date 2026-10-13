@@ -15,8 +15,6 @@ const initial = () => ({
   tx: {},            // loaded PSBT, its analysis and signing result
   log: [],           // signed PSBTs and messages (this tab only)
   logPrefs: { keep: true, retOn: false, d: 30, h: 0 },
-  seen: { ours: new Map(), theirs: new Map() },
-  seenPrefs: { keep: true, retOn: false, d: 30, h: 0 },
   sheet: null,
   toast: null,
 });
@@ -56,27 +54,16 @@ export function pruneLogs() {
   const now = Date.now();
   const cut = (prefs) => (prefs.retOn && (prefs.d || prefs.h) ? now - (prefs.d * 24 + prefs.h) * 3600e3 : null);
   const lc = cut(state.logPrefs);
-  const sc = cut(state.seenPrefs);
   let changed = false;
   let log = state.log;
   if (lc) { const n = log.filter((x) => x.time >= lc); if (n.length !== log.length) { log = n; changed = true; } }
-  const seen = { ours: new Map(state.seen.ours), theirs: new Map(state.seen.theirs) };
-  if (sc) for (const m of [seen.ours, seen.theirs]) for (const [k, v] of m) if (v.last < sc) { m.delete(k); changed = true; }
-  if (changed) setState({ log, seen });
+  if (changed) setState({ log });
 }
 setInterval(pruneLogs, 60e3);
 
 export function addLog(entry) {
   if (!state.logPrefs.keep) return;
   setState({ log: [{ ...entry, id: Math.random().toString(36).slice(2), time: Date.now() }, ...state.log] });
-}
-export function noteSeen(ours, theirs) {
-  if (!state.seenPrefs.keep) return;
-  const seen = { ours: new Map(state.seen.ours), theirs: new Map(state.seen.theirs) };
-  const now = Date.now();
-  for (const o of ours) seen.ours.set(o.addr, { ...o, last: now });
-  for (const t of theirs) if (!seen.ours.has(t.addr)) seen.theirs.set(t.addr, { ...t, last: now });
-  setState({ seen });
 }
 
 /** The network PSBTs are reviewed and signed for. */

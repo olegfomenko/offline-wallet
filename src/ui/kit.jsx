@@ -51,10 +51,8 @@ const NAV = [
   ['source', 'Sign transaction', I.IScan, ['source', 'load', 'notpsbt', 'review', 'signed-export', 'psbt-details']],
   ['addresses', 'Addresses', I.IList, ['addresses', 'address-help', 'edit-path', 'address', 'private-key', 'sign-verify']],
   ['signed', 'Signed', I.ISigned, ['signed']],
-  ['keys', 'Keys', I.IKey, ['keys']],
-  ['check-address', 'Check an address', I.ISearch, ['check-address']],
   ['seed', 'Seed', I.ILock, ['seed']],
-  ['settings', 'Settings', I.IGear, ['settings', 'wordlist', 'lastword']],
+  ['settings', 'Settings', I.IGear, ['settings', 'wordlist', 'lastword', 'check-address', 'check-passphrase', 'text-qr']],
 ];
 
 export function walletLabel(w) {

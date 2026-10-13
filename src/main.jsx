@@ -11,6 +11,7 @@ import * as H from './ui/screens/home.jsx';
 import * as A from './ui/screens/addresses.jsx';
 import * as S from './ui/screens/signing.jsx';
 import * as L from './ui/screens/logs.jsx';
+import * as T from './ui/screens/tools.jsx';
 
 watchInjections('app');
 
@@ -21,10 +22,10 @@ const OPEN = {
   restore: R.RestoreSeed, 'custom-seed': R.CustomSeed, 'restore-key': R.RestoreKey, 'check-master': R.CheckMasterKey, 'check-keys': R.CheckSingleKeys,
 };
 const WALLET = {
-  main: H.Main, seed: H.Seed, settings: H.Settings, wordlist: H.WordList, lastword: H.LastWord, 'check-address': H.CheckAddress,
+  main: H.Main, seed: H.Seed, settings: H.Settings, wordlist: H.WordList, lastword: H.LastWord, 'check-address': H.CheckAddress, 'check-passphrase': T.CheckPassphrase, 'text-qr': T.TextQr,
   addresses: A.Addresses, 'address-help': A.AddressHelp, 'edit-path': A.EditPath, address: A.AddressDetail, 'private-key': A.PrivateKey, 'sign-verify': A.SignVerify,
   source: S.SourceWallet, load: S.LoadTransaction, notpsbt: S.NotAPsbt, review: S.Review, 'signed-export': S.SignedExport, 'psbt-details': S.PsbtDetails,
-  signed: L.Signed, keys: L.Keys,
+  signed: L.Signed,
 };
 
 function App() {

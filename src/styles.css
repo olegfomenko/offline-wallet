@@ -388,3 +388,28 @@ label.wordcell.kbon { border: 2px solid var(--accent); padding: 0 7px; }
 /* The same hover on every key and button of the panel. */
 .kbd button:hover { filter: brightness(1.25); }
 @media (max-width: 420px) { .kk { height: 42px; font-size: 17px; } .kk.fn { font-size: 13px; } .kbd-row { gap: 4px; } .kbd { padding-left: 6px; padding-right: 6px; } }
+
+/* ---- passphrase: fingerprint box, Seed screen row ---- */
+.fpbox { display: flex; flex-direction: column; gap: 10px; padding: 14px; background: var(--surface); border: 1px solid var(--line); }
+.fprow { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.fpval { font: 600 20px var(--mono); letter-spacing: 0.06em; color: var(--text); }
+.fpval.wait { color: var(--line2); }
+.fpval.ok { color: var(--accent); }
+.fpval.bad { color: var(--danger); }
+.fpexp { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+.input.fpin { height: 48px; font: 400 16px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+.fpverdict { font-size: 14px; font-weight: 600; }
+.fptable { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); }
+.fptable > div { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 14px 16px; }
+.fptable > div + div { border-top: 1px solid var(--line); }
+.verdict { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border: 1px solid var(--line); }
+.verdict b { font-size: 16px; }
+.valbox.ppshown { white-space: pre-wrap; word-break: break-all; letter-spacing: 0.04em; font-size: 15px; display: flex; align-items: center; }
+.btn-privsm { height: 44px; flex-shrink: 0; padding: 0 12px; display: flex; align-items: center; gap: 6px; border: 1px solid var(--danger); background: transparent; color: var(--danger); font: 600 14px var(--sans); cursor: pointer; }
+.btn-privsm:hover { background: rgba(255, 90, 95, 0.08); }
+
+/* ---- Text to QR ---- */
+.qrtool { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 32px; align-items: start; }
+.qrtool .qrwrap svg { width: 100%; }
+.qrempty { display: flex; align-items: center; justify-content: center; aspect-ratio: 1; max-width: 360px; width: 100%; border: 1px dashed var(--line2); color: var(--dim); font-size: 14px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

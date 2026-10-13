@@ -39,10 +39,29 @@ export function Main() {
         <a class="tile" href="#/seed"><I.ILock size={26} /><div><b>Seed</b><span>{seedLabel}</span></div></a>
       </div>
       <div class="card">
-        <a class="cardlink" href="#/keys"><span class="muted">Keys</span><span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>{st.seen.ours.size} signed · {st.seen.theirs.size} seen<I.IChev /></span></a>
         <a class="cardlink" href="#/signed"><span class="muted">Signed</span><span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>{psbts} PSBT{psbts === 1 ? '' : 's'} · {msgs} message{msgs === 1 ? '' : 's'}<I.IChev /></span></a>
       </div>
     </NavShell>
+  );
+}
+
+/** The passphrase under the seed words: hidden until Show, spaces as ␣, exportable. */
+function PassphraseRow({ pass }) {
+  const [show, setShow] = useState(false);
+  if (!pass) return <span class="small">No passphrase. These words alone open this wallet.</span>;
+  const n = Array.from(pass).length;
+  return (
+    <div class="field">
+      <div class="fhead"><span class="flabel">Passphrase<PrivChip /></span>{show && <span class="note">{n} character{n === 1 ? '' : 's'}</span>}</div>
+      <div class="fbody">
+        <div class={'valbox' + (show ? ' ppshown' : ' hiddenv')} aria-live="polite">
+          {show ? pass.replace(/ /g, '␣') : <><span>••••••••••••</span><small>Hidden</small></>}
+        </div>
+        <button type="button" class="btn-privsm" aria-pressed={show ? 'true' : 'false'} onClick={() => setShow(!show)}><I.IEye size={16} />{show ? 'Hide' : 'Show'}</button>
+        <ExportBtn spec={{ title: 'Passphrase', value: pass, priv: true, file: 'passphrase.txt' }} />
+      </div>
+      <span class="note">Not part of the words above: without it they open a different, empty wallet. Spaces show as ␣. Keep its written copy apart from the seed backup.</span>
+    </div>
   );
 }
 
@@ -58,7 +77,7 @@ export function Seed() {
           <div class="fhead"><span class="flabel">Seed words · {w.words.length}<PrivChip /></span><ExportBtn spec={seedExportSpec(w.words)} /></div>
           <SeedGrid words={w.words} shown={shown} onShow={() => setShown(true)} />
           {shown && <button class="linkbtn" onClick={() => setShown(false)}>Hide words</button>}
-          {w.passphrase && <div class="infoline"><I.IInfo /><span>Passphrase is on. It is not part of these words, and without it they open a different, empty wallet.</span></div>}
+          <PassphraseRow pass={w.passphrase} />
           <div class="stack" style={{ gap: '4px' }}>
             <span class="caps s12">Works with</span>
             <span style={{ fontSize: '14px' }}>Any BIP39 wallet: Sparrow, BlueWallet, Nunchuk, Electrum</span>
@@ -67,8 +86,11 @@ export function Seed() {
         </div>
       )}
       {w.kind === 'custom' && (
-        <OutField label="Custom words · exact text" priv spec={{ title: 'Custom seed words', value: w.text, file: 'custom-seed-words.txt' }}
-          note={'Restore them with the same capital letters and accents. ' + (w.passphrase ? 'Passphrase is on and not part of these words.' : '')} />
+        <div class="stack14">
+          <OutField label="Custom words · exact text" priv spec={{ title: 'Custom seed words', value: w.text, file: 'custom-seed-words.txt' }}
+            note="Restore them with the same capital letters and accents." />
+          <PassphraseRow pass={w.passphrase} />
+        </div>
       )}
       {w.kind === 'xkey' && (
         <>
@@ -85,7 +107,8 @@ export function Seed() {
 }
 
 export function Settings() {
-  const { settings } = useStore();
+  const { settings, wallet: w } = useStore();
+  const hasPassphraseCheck = w && (w.kind === 'seed' || w.kind === 'custom');
   const un = settings.unit;
   const set = (p) => patch('settings', p);
   const Link = ({ to, t, s, last }) => (
@@ -116,7 +139,15 @@ export function Settings() {
       </div>
       <div class="stack" style={{ gap: '8px' }}>
         <span class="caps s12">Seed tools</span>
-        <div class="card"><Link to="wordlist" t="BIP39 word list" s="All 2048 words, decimal and binary" /><Link to="lastword" t="Find the last word" s="Checksum for 11 or 23 words you chose" /></div>
+        <div class="card">
+          <Link to="wordlist" t="BIP39 word list" s="All 2048 words, decimal and binary" />
+          <Link to="lastword" t="Find the last word" s="Checksum for 11 or 23 words you chose" />
+          {hasPassphraseCheck && <Link to="check-passphrase" t="Check passphrase" s="Does a written passphrase open this wallet?" />}
+        </div>
+      </div>
+      <div class="stack" style={{ gap: '8px' }}>
+        <span class="caps s12">Tools</span>
+        <div class="card"><Link to="text-qr" t="Text to QR" s="Show any text as a QR code" /></div>
       </div>
       <div class="stack" style={{ gap: '8px' }}>
         <span class="caps s12">About</span>

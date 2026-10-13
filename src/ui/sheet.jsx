@@ -39,7 +39,7 @@ export function Sheet() {
 }
 
 // ---------- QR display ----------
-export function QR({ text, frames, next, numeric, blur, label, size = 280, interval = 280 }) {
+export function QR({ text, frames, next, numeric, blur, label, size = 280, interval = 280, ecc }) {
   const [i, setI] = useState(0);
   const [cur, setCur] = useState(() => (next ? next() : null));
   const animated = !!next || (frames && frames.length > 1);
@@ -51,7 +51,7 @@ export function QR({ text, frames, next, numeric, blur, label, size = 280, inter
     return () => clearInterval(t);
   }, [animated, next, frames]);
   const value = next ? cur : frames ? frames[i % frames.length] : text;
-  const m = useMemo(() => { try { return qrMatrix(value, { numeric }); } catch (e) { return null; } }, [value, numeric]);
+  const m = useMemo(() => { try { return qrMatrix(value, { numeric, ecc }); } catch (e) { return null; } }, [value, numeric, ecc]);
   if (!m) return <div class="note err">Too large for one QR code. Use the file instead.</div>;
   return (
     <div class="qrwrap">

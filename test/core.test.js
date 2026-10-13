@@ -7,7 +7,7 @@ import * as btc from '@scure/btc-signer';
 import { HDKey } from '@scure/bip32';
 import { hex, utf8, base64 } from '../src/core/util.js';
 import { descChecksum, parseDescriptor, parseExt, serializeExt, addressOf, decodeAddress, withChecksum, TYPES } from '../src/core/hd.js';
-import { walletFromMnemonic, walletFromCustom, readXkey, walletFromXkey, walletFromKeys, accountKeys, account, addressAt, lastWordCandidates, isValidMnemonic, seedQREncode, seedQRDecode, customSeedText } from '../src/core/wallet.js';
+import { walletFromMnemonic, walletFromCustom, fingerprintWith, readXkey, walletFromXkey, walletFromKeys, accountKeys, account, addressAt, lastWordCandidates, isValidMnemonic, seedQREncode, seedQRDecode, customSeedText } from '../src/core/wallet.js';
 import { decodeWIF, encodeWIF, parseKeyLine, decryptBIP38, pubOf, keyAddress, looksExtended, ELECTRUM_PREFIX } from '../src/core/keys.js';
 import { makeEntropy, countedBits, neededBits } from '../src/core/entropy.js';
 import { signMessageECDSA, verifyMessageECDSA, signMessageSchnorr, verifyMessageSchnorr } from '../src/core/message.js';
@@ -382,4 +382,16 @@ test('restore input errors are clear', () => {
   expect(looksExtended(wif)).toBe(false);
   expect(() => parseKeyLine(root)).toThrow(/Master key/);
   expect(() => readXkey(withChecksum('combo(' + root + ')'))).toThrow(/single keys/);
+});
+
+test('passphrase fingerprint check (Passphrase step, Check passphrase)', () => {
+  expect(fingerprintWith({ words: ABANDON }, '')).toBe('73C5DA0A');
+  const withPass = fingerprintWith({ words: ABANDON }, 'correct horse battery');
+  expect(withPass).toBe(walletFromMnemonic(ABANDON, 'correct horse battery').fp);
+  expect(withPass === '73C5DA0A').toBe(false);
+  // Capitals, spaces and accents all count; Unicode is NFKD-normalized (é typed two ways is the same).
+  expect(fingerprintWith({ words: ABANDON }, 'Correct horse battery') === withPass).toBe(false);
+  expect(fingerprintWith({ words: ABANDON }, 'caf\u00e9')).toBe(fingerprintWith({ words: ABANDON }, 'cafe\u0301'));
+  // Custom words go through the same check.
+  expect(fingerprintWith({ custom: 'Sol 7' }, 'x')).toBe(walletFromCustom('Sol 7', 'x').fp);
 });

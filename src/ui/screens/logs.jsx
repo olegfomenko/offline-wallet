@@ -1,11 +1,10 @@
-// Signed (PSBTs and messages) and Keys (addresses signed with / seen). In this tab only.
+// Signed: PSBTs and messages signed in this tab only.
 import { h, Fragment } from 'preact';
 import { useState } from 'preact/hooks';
 import { go } from '../router.js';
-import { getState, setState, patch, useStore } from '../store.js';
-import { NavShell, I, Card, shortAddr, fmtTime } from '../kit.jsx';
+import { setState, patch, useStore } from '../store.js';
+import { NavShell, I, fmtTime } from '../kit.jsx';
 import { download } from '../io.js';
-import { TYPES } from '../../core/hd.js';
 
 function Retention({ prefsKey, keepLabel, clearLabel, onClear }) {
   const st = useStore();
@@ -101,53 +100,6 @@ export function Signed() {
       <Downloads name="signed-log"
         csv={() => 'time,type,id,summary\n' + log.map((x) => [new Date(x.time).toISOString(), x.kind, x.txid || x.address, x.kind === 'psbt' ? x.snapshot.analysis.outputs.length + ' outputs' : x.main].map(csvCell).join(',')).join('\n') + '\n'}
         json={() => JSON.stringify(log.map((x) => ({ time: new Date(x.time).toISOString(), type: x.kind, txid: x.txid, address: x.address, message: x.kind === 'msg' ? x.prefill.msg : undefined, signature: x.kind === 'msg' ? x.prefill.sig : undefined })), null, 2)} />
-    </NavShell>
-  );
-}
-
-export function Keys() {
-  const st = useStore();
-  const ours = [...st.seen.ours.values()].sort((a, b) => b.last - a.last);
-  const theirs = [...st.seen.theirs.values()].sort((a, b) => b.last - a.last);
-  const openOurs = (x) => {
-    const w = getState().wallet;
-    if (w.kind === 'keys') {
-      const i = w.keys.findIndex((k) => k.type === x.type);
-      setState({ addrSel: { keyIdx: Math.max(0, i), type: x.type, net: st.settings.net, addr: x.addr } });
-    } else if (x.path) {
-      const parts = x.path.split('/');
-      const i = parseInt(parts.pop(), 10), branch = parseInt(parts.pop(), 10);
-      setState({ addrSel: { type: x.type, base: parts.join('/'), branch, i, net: st.settings.net, addr: x.addr, custom: false } });
-    }
-    go('address');
-  };
-  const Group = ({ title, hint, items, isOurs }) => (
-    <div class="stack">
-      <span style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}><span class="caps s12">{title}</span><span class="note">{hint}</span></span>
-      {items.length ? <div class="card">{items.map((x) => (
-        <button class="listrow" onClick={() => (isOurs ? openOurs(x) : (setState({ tx: { ...x.snapshot, detailsFrom: 'keys' } }), go('psbt-details')))}>
-          <div class="top"><span class="main mono">{shortAddr(x.addr)}</span><span class="typ" style={{ color: isOurs ? 'var(--accent)' : 'var(--muted)' }}>{isOurs ? (TYPES[x.type] ? TYPES[x.type].short : '') : x.scriptName}</span></div>
-          <span class="date">{fmtTime(x.last)}</span>
-        </button>
-      ))}</div> : <div class="infoline">None yet.</div>}
-    </div>
-  );
-  return (
-    <NavShell max={1040} gap={16}>
-      <h1>Keys</h1>
-      <span class="small">Addresses this device has signed with, and other people’s addresses it has seen in PSBTs. Kept for recognition only; nothing here can spend.</span>
-      <div class="cols2">
-        <div>
-          <Group title={'Signed with · ' + ours.length} hint="This wallet’s addresses. Opens the address." items={ours} isOurs />
-          <Group title={'Seen in PSBTs · ' + theirs.length} hint="Other people’s addresses from PSBTs. Never signed with, no names. Opens the PSBT." items={theirs} />
-        </div>
-        <div>
-          <Retention prefsKey="seenPrefs" keepLabel="Keep this list" clearLabel="Clear the list" onClear={() => setState({ seen: { ours: new Map(), theirs: new Map() } })} />
-        </div>
-      </div>
-      <Downloads name="keys"
-        csv={() => 'group,address,type,last_seen\n' + ours.map((x) => ['signed', x.addr, x.type, new Date(x.last).toISOString()].map(csvCell).join(',')).concat(theirs.map((x) => ['seen', x.addr, x.scriptName, new Date(x.last).toISOString()].map(csvCell).join(','))).join('\n') + '\n'}
-        json={() => JSON.stringify({ signed: ours.map((x) => ({ address: x.addr, type: x.type, path: x.path, last: new Date(x.last).toISOString() })), seen: theirs.map((x) => ({ address: x.addr, type: x.scriptName, last: new Date(x.last).toISOString() })) }, null, 2)} />
     </NavShell>
   );
 }

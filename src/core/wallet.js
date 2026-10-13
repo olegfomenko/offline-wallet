@@ -106,6 +106,18 @@ export function walletFromKeys(keys) {
   return { kind: 'keys', keys, fp: null, fpKnown: false, net: keys[0] && keys[0].net === 'test' ? 'test' : 'main' };
 }
 
+/**
+ * Master fingerprint that seed words (or custom words) give with a passphrase, without keeping the
+ * wallet: the key is wiped right away. Used to check a passphrase against a written fingerprint.
+ * `src`: { words } for BIP39 words, { custom } for custom words.
+ */
+export function fingerprintWith(src, passphrase = '') {
+  const w = src.custom != null ? walletFromCustom(src.custom, passphrase) : walletFromMnemonic(src.words, passphrase);
+  const fp = w.fp;
+  try { w.root.wipePrivateData(); } catch (e) { /* best effort */ }
+  return fp;
+}
+
 export function isHD(w) { return w && w.kind !== 'keys'; }
 export function hasRoot(w) { return !!(w && w.root); }
 

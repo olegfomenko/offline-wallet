@@ -1,13 +1,13 @@
 // Welcome and "Create a wallet": length → randomness → write down → check → passphrase → ready.
 import { h, Fragment } from 'preact';
-import { useState, useMemo, useRef } from 'preact/hooks';
+import { useState, useMemo, useRef, useEffect } from 'preact/hooks';
 import { go } from '../router.js';
 import { getState, setState, patch, useStore } from '../store.js';
 import { FlowShell, StepRow, Seg, Switch, Spacer, OutField, ExportBtn, PrivChip, InField, I, Card, walletLabel, useNet } from '../kit.jsx';
 import { environment } from '../env.js';
 import { Keyboard, useKbd } from '../Keyboard.jsx';
 import { makeEntropy, countedBits, neededBits, DICE_BITS } from '../../core/entropy.js';
-import { mnemonicFromEntropy, walletFromMnemonic, walletFromCustom, seedQREncode, wordlist } from '../../core/wallet.js';
+import { mnemonicFromEntropy, walletFromMnemonic, walletFromCustom, seedQREncode, wordlist, fingerprintWith } from '../../core/wallet.js';
 import { randomInt, wipe } from '../../core/util.js';
 
 // ---------- Welcome ----------
@@ -324,53 +324,101 @@ export function CheckBackup() {
 }
 
 // ---------- 6 · Passphrase ----------
+/**
+ * Fingerprint for words + passphrase, computed shortly after typing stops (PBKDF2 takes a moment).
+ * Returns null until the fingerprint for exactly the current input is ready, so a stale one is
+ * never shown.
+ */
+export function useFingerprint(src, pass, enabled = true) {
+  const [res, setRes] = useState({ k: null, fp: null });
+  const k = src ? (src.custom != null ? 'c:' + src.custom : 'w:' + (src.words || []).join(' ')) + '\u0000' + pass : null;
+  useEffect(() => {
+    if (!enabled || !src) return undefined;
+    const t = setTimeout(() => { let fp = null; try { fp = fingerprintWith(src, pass); } catch (e) { /* invalid input */ } setRes({ k, fp }); }, 120);
+    return () => clearTimeout(t);
+  }, [enabled, k]);
+  return enabled && res.k === k ? res.fp : null;
+}
+
 export function Passphrase() {
   const { flow } = useStore();
   const [on, setOn] = useState(() => getState().flow.origin !== 'restore');
   const [p1, setP1] = useState('');
   const [p2, setP2] = useState('');
+  const [exp, setExp] = useState('');
   const [err, setErr] = useState('');
   const kb = useKbd();
   const restore = flow.origin === 'restore';
-  if (!flow.words && !flow.custom) { go('welcome'); return null; }
+  const src = flow.custom ? { custom: flow.custom } : flow.words ? { words: flow.words } : null;
+  const waiting = on && !p1;
+  const fp = useFingerprint(src, on ? p1 : '', !waiting);
+  if (!src) { go('welcome'); return null; }
   const match = p1 === p2;
-  const ready = !on || (p1.length > 0 && match);
+  // Creating asks for the passphrase twice; restoring checks it against the written fingerprint instead.
+  const ready = !on || (p1.length > 0 && (restore || match));
   const back = restore ? (flow.custom ? 'custom-seed' : 'restore') : 'check-backup';
+  const ex = exp.trim().toUpperCase();
+  const expOk = ex.length === 8 && fp && ex === fp;
   const create = () => {
     try {
       const pass = on ? p1 : '';
       const w = flow.custom ? walletFromCustom(flow.custom, pass) : walletFromMnemonic(flow.words, pass);
       w.net = getState().settings.net;
       setState({ wallet: w, flow: { origin: flow.origin, done: true }, addr: { ...getState().addr, cpath: {} } });
-      setP1(''); setP2('');
+      setP1(''); setP2(''); setExp('');
       go('wallet-ready');
     } catch (e) { setErr(e.message); }
   };
   return (
     <FlowShell max={600}>
-      {restore ? <StepRow back={back} step={2} of={2} label="Last step" /> : <StepRow back={back} step={6} />}
+      {restore ? <StepRow back={back} step={6} label="Restore · last step" /> : <StepRow back={back} step={6} />}
       <div class="stack" style={{ gap: '8px' }}>
-        <h1>{restore ? 'Was there a passphrase?' : 'Add a passphrase?'}</h1>
-        <p class="lead">{restore ? 'If your wallet used one, enter it exactly. A different passphrase opens a different, empty wallet.' : 'Optional. It acts as a 25th word: the same seed with a different passphrase opens a different wallet.'}</p>
+        <h1>{restore ? 'Did this wallet use a passphrase?' : 'Add a passphrase?'}</h1>
+        <p class="lead">{restore ? 'Only if one was set when the wallet was made. Enter it exactly: a different passphrase opens a different, empty wallet.' : 'Optional. It acts as a 25th word: the same seed with a different passphrase opens a different wallet.'}</p>
       </div>
-      <Switch on={on} onClick={() => setOn(!on)} label="Use a passphrase" />
+      <Switch on={on} onClick={() => setOn(!on)} label={restore ? 'The wallet uses a passphrase' : 'Use a passphrase'} />
       {on && (
         <div class="stack14">
           <InField id="pp1" label="Passphrase" priv password mono={false} value={p1} onInput={setP1} placeholder="Enter passphrase"
             kb={{ what: 'the passphrase', isOpen: kb.id === 'p1', open: () => kb.open('p1') }} />
-          <InField id="pp2" label="Repeat passphrase" priv password mono={false} value={p2} onInput={setP2} placeholder="Enter it again"
-            kb={{ what: 'the repeated passphrase', isOpen: kb.id === 'p2', open: () => kb.open('p2') }}
-            note={p2 ? (match ? 'Both entries match.' : 'The two entries don’t match.') : 'Capital letters, spaces and accents all count.'} noteCls={p2 && !match ? 'err' : ''} />
-          <div class="warnline"><I.IWarn /><span>It is not part of your seed backup. If you lose it, the funds are gone. Write it down separately.</span></div>
+          {!restore && (
+            <>
+              <InField id="pp2" label="Repeat passphrase" priv password mono={false} value={p2} onInput={setP2} placeholder="Enter it again"
+                kb={{ what: 'the repeated passphrase', isOpen: kb.id === 'p2', open: () => kb.open('p2') }}
+                note={p2 ? (match ? 'Both entries match.' : 'The two entries don’t match.') : 'Capital letters, spaces and accents all count.'} noteCls={p2 && !match ? 'err' : ''} />
+              <div class="warnline"><I.IWarn /><span>It is not part of your seed backup. If you lose it, the funds are gone. Write it down separately.</span></div>
+            </>
+          )}
         </div>
       )}
+      <div class="fpbox">
+        <div class="fprow">
+          <span class="small" style={{ fontSize: '14px' }}>{on ? 'Fingerprint with this passphrase' : 'Fingerprint without a passphrase'}</span>
+          <span class={'fpval' + (waiting ? ' wait' : '')}>{waiting ? '········' : fp || '········'}</span>
+        </div>
+        <span class="small">{waiting ? 'Enter the passphrase to see the fingerprint it gives.'
+          : restore ? 'Compare it with the fingerprint you wrote down. If they differ, a word or the passphrase is wrong.'
+            : 'Write it down with your backup. Typing the passphrase again later must give the same fingerprint (Settings → Check passphrase).'}</span>
+        {restore && (
+          <div class="fpexp">
+            <label for="pp-exp" class="small">Fingerprint you wrote down (optional)</label>
+            <input id="pp-exp" class="input fpin" type="text" value={exp} maxLength={8} autocomplete="off" spellcheck={false} placeholder="e.g. 73C5DA0A"
+              onInput={(e) => setExp(e.currentTarget.value.replace(/[^0-9a-fA-F]/g, '').toUpperCase())} />
+            {ex.length > 0 && (
+              <span role="status" class="fpverdict" style={{ color: ex.length < 8 ? 'var(--muted)' : expOk ? 'var(--accent)' : 'var(--danger)' }}>
+                {ex.length < 8 ? 'Fingerprints have 8 characters.' : !fp ? 'Enter the passphrase first.' : expOk ? '✓ Matches. This is your wallet.' : '✗ Doesn’t match. Check the passphrase, then the seed words.'}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
       {err && <span class="note err">{err}</span>}
       <Spacer />
       {ready ? <button class="btn-primary" onClick={create}>{restore ? (on ? 'Restore with passphrase' : 'Restore without passphrase') : on ? 'Create wallet with passphrase' : 'Create wallet without passphrase'}</button>
         : <button class="btn-primary" disabled>{p1 ? 'Enter the same passphrase twice' : 'Enter a passphrase'}</button>}
       <Keyboard kb={kb} targets={on ? {
         p1: { label: 'Passphrase', layout: 'text', mask: true, value: p1, onChange: setP1, anchor: 'pp1' },
-        p2: { label: 'Repeat passphrase', layout: 'text', mask: true, value: p2, onChange: setP2, anchor: 'pp2' },
+        ...(restore ? {} : { p2: { label: 'Repeat passphrase', layout: 'text', mask: true, value: p2, onChange: setP2, anchor: 'pp2' } }),
       } : {}} />
     </FlowShell>
   );

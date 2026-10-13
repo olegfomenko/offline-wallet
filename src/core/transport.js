@@ -2,7 +2,7 @@
 // animated QR formats, and detection of whatever was scanned, pasted or loaded.
 import { base32 } from '@scure/base';
 import { Inflate } from 'fflate';
-import { URDecoder, psbtFromURcbor, psbtToURparts } from './ur.js';
+import { URDecoder, psbtFromURcbor, psbtToURparts, encodeUR, cbor } from './ur.js';
 import { hex, base64, isHex, utf8, concat } from './util.js';
 import { decodeAddress } from './hd.js';
 
@@ -109,7 +109,8 @@ function inflateLimited(data, limit) {
 export class PMofNDecoder {
   constructor() { this.parts = new Map(); this.total = 0; this.result = null; }
   receive(s) {
-    const m = /^p(\d+)of(\d+)\s+(\S+)$/.exec(String(s).trim());
+    // The payload is kept exactly, spaces included, so any text survives (a PSBT has none).
+    const m = /^p(\d+)of(\d+) ([\s\S]+)$/.exec(String(s).replace(/^\s+/, ''));
     if (!m) return false;
     const i = +m[1], n = +m[2];
     if (!n || i < 1 || i > n || (this.total && this.total !== n)) return false;
@@ -126,9 +127,11 @@ export class PMofNDecoder {
   counts() { return { got: this.parts.size, total: this.total }; }
 }
 export function pmofnSplit(text, size = 600) {
-  const n = Math.ceil(text.length / size);
+  // Split by code points, so no character (an emoji, say) is cut in two.
+  const cps = Array.from(text);
+  const n = Math.ceil(cps.length / size);
   if (n <= 1) return [text];
-  return Array.from({ length: n }, (_, i) => 'p' + (i + 1) + 'of' + n + ' ' + text.slice(i * size, (i + 1) * size));
+  return Array.from({ length: n }, (_, i) => 'p' + (i + 1) + 'of' + n + ' ' + cps.slice(i * size, (i + 1) * size).join(''));
 }
 
 /**
@@ -146,7 +149,7 @@ export class MultiPartCollector {
     if (!kind) return { status: 'single' };
     if (this.kind && this.kind !== kind) return { status: 'ignored' };
     if (!this.dec) { this.kind = kind; this.dec = kind === 'UR' ? new URDecoder() : kind === 'BBQr' ? new BBQrDecoder() : new PMofNDecoder(); }
-    const ok = this.dec.receive(t);
+    const ok = this.dec.receive(kind === 'pMofN' ? String(text) : t);
     if (!ok) return { status: 'ignored' };
     if (this.dec.done) return { status: 'done', kind, payload: this.payload() };
     return { status: 'partial', kind, ...this.dec.counts(), progress: this.dec.progress() };
@@ -273,4 +276,21 @@ export function psbtQRFrames(bytes, format) {
   if (enc.single) return { frames: [enc.next().toUpperCase()], animated: false, alnum: true };
   // Fountain codes: show every original part once, then keep emitting mixed parts.
   return { next: () => enc.next().toUpperCase(), seqLen: enc.seqLen, animated: true, alnum: true };
+}
+
+// ---- Any text as QR (Settings → Text to QR) ----
+/**
+ * Frames for text too long for one QR code:
+ * - 'bbqr': BBQr, file type U (UTF-8 text), Base32;
+ * - 'ur': UR of type "bytes" (fountain-coded; `seqLen` original parts, then mixed ones);
+ * - 'split': numbered "p1of3 …" parts (pMofN, as Specter reads them).
+ */
+export function textQRFrames(text, mode) {
+  const bytes = utf8.encode(String(text));
+  if (mode === 'ur') {
+    const enc = encodeUR('bytes', cbor.bytes(bytes), 250);
+    return { seqLen: enc.seqLen, next: () => enc.next().toUpperCase() };
+  }
+  if (mode === 'split') return { frames: pmofnSplit(String(text), 300) };
+  return { frames: bbqrSplit(bytes, 'U') };
 }
