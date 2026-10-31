@@ -78,7 +78,7 @@ export function Signed() {
   return (
     <NavShell max={1040} gap={16}>
       <h1>Signed</h1>
-      <span class="small">Transactions and messages signed on this device, newest first. It can't see the network, so it never knows if a transaction was broadcast. Times use the device clock.</span>
+      <span class="small">Transactions, messages and raw digests signed on this device, newest first. It can't see the network, so it never knows if a transaction was broadcast. Times use the device clock.</span>
       <div class="cols2">
         <div>
           <div class="stack">
@@ -86,8 +86,8 @@ export function Signed() {
             {log.length ? (
               <div class="card">{log.map((x) => (
                 <button key={x.id} class="listrow" onClick={() => open(x)}>
-                  <div class="top"><span class={'main' + (x.kind === 'psbt' ? ' mono' : '')}>{x.main}</span><span class="typ" style={{ color: x.kind === 'psbt' ? 'var(--accent)' : 'var(--muted)' }}>{x.kind === 'psbt' ? 'PSBT' : 'Message'}</span></div>
-                  <span class="date">{fmtTime(x.time)}</span>
+                  <div class="top"><span class={'main' + (x.kind !== 'msg' ? ' mono' : '')}>{x.main}</span><span class="typ" style={{ color: x.kind === 'psbt' ? 'var(--accent)' : x.kind === 'raw' ? 'var(--warn)' : 'var(--muted)' }}>{x.kind === 'psbt' ? 'PSBT' : x.kind === 'raw' ? 'Raw' : 'Message'}</span></div>
+                  <span class="date">{fmtTime(x.time)}{x.fmt ? ' · ' + x.fmt : ''}</span>
                 </button>
               ))}</div>
             ) : <div class="infoline">Nothing signed yet in this tab.</div>}
@@ -99,7 +99,7 @@ export function Signed() {
       </div>
       <Downloads name="signed-log"
         csv={() => 'time,type,id,summary\n' + log.map((x) => [new Date(x.time).toISOString(), x.kind, x.txid || x.address, x.kind === 'psbt' ? x.snapshot.analysis.outputs.length + ' outputs' : x.main].map(csvCell).join(',')).join('\n') + '\n'}
-        json={() => JSON.stringify(log.map((x) => ({ time: new Date(x.time).toISOString(), type: x.kind, txid: x.txid, address: x.address, message: x.kind === 'msg' ? x.prefill.msg : undefined, signature: x.kind === 'msg' ? x.prefill.sig : undefined })), null, 2)} />
+        json={() => JSON.stringify(log.map((x) => ({ time: new Date(x.time).toISOString(), type: x.kind, txid: x.txid, address: x.address, message: x.kind === 'msg' ? x.prefill.msg : undefined, digest: x.kind === 'raw' ? x.prefill.dig : undefined, format: x.fmt, signature: x.kind !== 'psbt' ? x.prefill.sig : undefined })), null, 2)} />
     </NavShell>
   );
 }

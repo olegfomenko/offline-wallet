@@ -1,7 +1,7 @@
 // Addresses: type, account, path, xpub/descriptor export, address list, detail, private keys,
 // path editor, and message signing.
 import { h, Fragment } from 'preact';
-import { useState, useMemo, useEffect } from 'preact/hooks';
+import { useState, useMemo, useEffect, useRef } from 'preact/hooks';
 import { go } from '../router.js';
 import { getState, setState, patch, useStore, addLog } from '../store.js';
 import { NavShell, TitleRow, Seg, Chips, UTabs, OutField, ExportBtn, InField, I, Addr, shortAddr, fmtTime } from '../kit.jsx';
@@ -10,7 +10,7 @@ import { download } from '../io.js';
 import { accountKeys, addressAt } from '../../core/wallet.js';
 import { TYPES, TYPE_ORDER, NETS, stdAccountPath, normPath, payment, xonly, withChecksum } from '../../core/hd.js';
 import { encodeWIF, pubOf, ELECTRUM_PREFIX } from '../../core/keys.js';
-import { signMessageECDSA, verifyMessageECDSA, signMessageSchnorr, verifyMessageSchnorr } from '../../core/message.js';
+import { signDigest, verifyDigest, signingPub, toDER, isDER } from '../../core/message.js';
 import { hex, base64, hash160, isHex } from '../../core/util.js';
 import { textToBytes, bytesToText } from '../../core/encoding.js';
 import { startMessageAntiExfil } from './antiexfil.jsx';
@@ -382,7 +382,62 @@ export function PrivateKey() {
   );
 }
 
-// ---------- message signing ----------
+// ---------- message and raw-digest signing ----------
+const SIG_FMT = (alg, efmt) => (alg === 'schnorr' ? 'Schnorr · 64 bytes' : efmt === 'der' ? 'ECDSA · DER' : 'ECDSA · 65 bytes');
+const keyLabel = (sel, R) => (sel.keyIdx !== undefined ? R.key.label || 'Key' : (sel.branch ? 'Change' : 'Receive') + ' #' + sel.i);
+
+/** Add a message or raw-digest signature to the Signed log, with what Verify needs to check it again. */
+export function logSignature({ raw, alg, efmt, mfmt, msg, bytes, sig, address, who, sel, ae }) {
+  const prefill = raw
+    ? { what: 'raw', alg, dfmt: 'hex', dig: hex.encode(bytes), vfmt: 'b64', sig: base64.encode(sig), who }
+    : { what: 'msg', alg, mfmt, msg, vfmt: 'b64', sig: base64.encode(sig), who };
+  const main = raw ? hex.encode(bytes).slice(0, 8) + '…' + hex.encode(bytes).slice(-8) : mfmt === 'text' ? msg.slice(0, 120) : mfmt + ' message · ' + bytes.length + ' bytes';
+  addLog({ kind: raw ? 'raw' : 'msg', main, fmt: SIG_FMT(alg, efmt), address, alg, ae: !!ae, prefill, sel });
+}
+
+/** The "?" panel: how the signing options work, instead of notes under every field. */
+function SignHelp({ onClose }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const back = document.activeElement;
+    if (ref.current) ref.current.focus();
+    const f = (e) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } };
+    window.addEventListener('keydown', f);
+    return () => { window.removeEventListener('keydown', f); if (back && back.focus) back.focus(); };
+  }, []);
+  const Sec = ({ t, children }) => <section class="helpsec"><h3>{t}</h3><ul>{children}</ul></section>;
+  return (
+    <div class="scrim">
+      <button class="closer" aria-label="Close" tabIndex={-1} onClick={onClose} />
+      <div role="dialog" aria-modal="true" aria-labelledby="sv-help-title" class="dialog helpdlg">
+        <span aria-hidden="true" class="handle" />
+        <div class="dhead"><h2 id="sv-help-title" class="ttl">How signing works</h2><button ref={ref} class="xbtn" aria-label="Close" onClick={onClose}><I.IClose /></button></div>
+        <Sec t="Message">
+          <li><b>ECDSA:</b> a classic Bitcoin signed message (BIP-137). The message gets the “Bitcoin Signed Message” prefix and is hashed, so the signature can never spend coins. 65 bytes; Electrum, Sparrow and most wallets verify it with just the address.</li>
+          <li><b>Schnorr:</b> BIP-340 over the BIP-322 message hash, 64 bytes. Verifiers need your x-only public key. Few wallets check it yet.</li>
+        </Sec>
+        <Sec t="Raw hash">
+          <li>Signs exactly the 32 bytes you enter, with no prefix and no hashing. Use it for transaction sighashes or digests your own software computed.</li>
+          <li class="danger"><b>Warning:</b> a raw signature can authorize spending the coins on this address. Only sign digests you computed or trust.</li>
+          <li><b>ECDSA in a transaction:</b> use DER and append the sighash byte (01 for SIGHASH_ALL).</li>
+        </Sec>
+        <Sec t="Signature formats">
+          <li><b>65 bytes (recoverable):</b> the key can be recovered from it, so the address is enough to verify.</li>
+          <li><b>DER:</b> the standard ECDSA encoding used inside transactions. The verifier needs the public key or address.</li>
+          <li><b>Schnorr:</b> always 64 bytes. The verifier needs the x-only key.</li>
+          <li><b>Taproot address:</b> Schnorr signs with the address’s own key, the tweaked output key, for messages and raw hashes alike, as a Taproot key-path spend needs. “Public key used” shows it.</li>
+        </Sec>
+        <Sec t="Anti-exfil signing">
+          <li>Your online wallet adds its own randomness to the nonce, so this signer can’t leak your key through the signature. The signature format stays the same.</li>
+        </Sec>
+        <Sec t="Verify">
+          <li>ECDSA checks against an address; Schnorr checks against an x-only public key. Nothing leaves this computer.</li>
+        </Sec>
+      </div>
+    </div>
+  );
+}
+
 export function SignVerify() {
   const st = useStore();
   const w = st.wallet;
@@ -390,17 +445,25 @@ export function SignVerify() {
   const sel = st.addrSel;
   const pre = st.sigPrefill;
   const done = st.sigDone; // back from anti-exfil signing with its signature
-  const [S, set0] = useState(() => (done
-    ? { tab: 'sign', alg: done.alg, mfmt: done.mfmt, msg: done.msg, msgErr: '', sig: done.sig, ae: true, sfmt: 'b64', vfmt: 'b64', vsig: '', who: null, res: null }
-    : { tab: pre ? 'verify' : 'sign', alg: pre ? pre.alg : 'ecdsa', mfmt: pre ? pre.mfmt : 'text', msg: pre ? pre.msg : '', msgErr: '', sig: null, ae: false, sfmt: 'b64', vfmt: pre ? pre.vfmt : 'b64', vsig: pre ? pre.sig : '', who: pre ? pre.who : null, res: null }));
+  const [S, set0] = useState(() => {
+    const base = { tab: 'sign', what: 'msg', alg: 'ecdsa', mfmt: 'text', msg: '', dfmt: 'hex', dig: '', msgErr: '', sig: null, ae: false, efmt: null, sfmt: 'b64', vfmt: 'b64', vsig: '', who: null, res: null, help: false };
+    if (done) return { ...base, what: done.what, alg: done.alg, mfmt: done.mfmt, msg: done.msg, dfmt: done.dfmt, dig: done.dig, sig: done.sig, efmt: done.efmt, ae: true };
+    if (pre) return { ...base, tab: 'verify', what: pre.what || 'msg', alg: pre.alg, mfmt: pre.mfmt || 'text', msg: pre.msg || '', dfmt: pre.dfmt || 'hex', dig: pre.dig || '', vfmt: pre.vfmt, vsig: pre.sig, who: pre.who };
+    return base;
+  });
   useEffect(() => { if (done) setState({ sigDone: null }); }, []);
   const set = (p) => set0((s) => ({ ...s, ...(('sig' in p) && !('ae' in p) ? { ae: false } : {}), ...p }));
   if (!sel) { go('addresses'); return null; }
   const R = resolveSel(w, sel, net);
-  const xpk = hex.encode(xonly(R.pub));
+  const raw = S.what === 'raw';
   const isSign = S.tab === 'sign';
-  const bytes = textToBytes(S.msg, S.mfmt);
-  const msgBad = !bytes;
+  const fmt = raw ? S.dfmt : S.mfmt;
+  const bytes = textToBytes(raw ? S.dig : S.msg, fmt);
+  const msgBad = !bytes || (raw && bytes.length !== 32);
+  const efmt = S.efmt || (raw ? 'der' : 'rec');
+  // The key a verifier needs: 33-byte for ECDSA; x-only for Schnorr (on Taproot, the key in the address).
+  const pubUsed = hex.encode(signingPub(S.alg, R.priv, R.type));
+  const who = S.who !== null ? S.who : S.alg === 'ecdsa' ? R.address : pubUsed;
   const switchMsg = (k) => {
     if (k === S.mfmt) return;
     if (!bytes) return set({ msgErr: S.mfmt === 'hex' ? 'Fix the hex first: pairs of 0–9 and a–f.' : 'Fix the base64 first.' });
@@ -408,33 +471,48 @@ export function SignVerify() {
     if (out === null) return set({ msgErr: 'These bytes are not readable text. Keep them as hex or base64.' });
     set({ mfmt: k, msg: out, msgErr: '', res: null });
   };
-  const who = S.who !== null ? S.who : S.alg === 'ecdsa' ? R.address : xpk;
-  const msgNote = S.msgErr || (msgBad ? (S.mfmt === 'hex' ? 'Not valid hex.' : 'Not valid base64.') : bytes.length + ' bytes' + (S.mfmt === 'text' ? ' · UTF-8' : ''));
+  const switchDig = (k) => { if (k !== S.dfmt) set({ dfmt: k, dig: bytes && S.dig.trim() ? bytesToText(bytes, k) : S.dig, res: null }); };
+  const fmtName = fmt === 'hex' ? 'hex' : 'base64';
+  const msgNote = raw
+    ? (!bytes ? 'Not valid ' + fmtName + '.' : bytes.length === 32 ? '✓ 32 bytes' : 'Must be exactly 32 bytes; got ' + bytes.length)
+    : S.msgErr || (msgBad ? 'Not valid ' + fmtName + '.' : bytes.length + ' bytes' + (S.mfmt === 'text' ? ' · UTF-8' : ''));
+  const msgNoteCls = raw ? (msgBad ? (S.dig.trim() ? 'err' : '') : 'ok') : S.msgErr || msgBad ? 'err' : '';
   const run = () => {
     if (msgBad) return;
     if (isSign) {
-      const sig = S.alg === 'ecdsa' ? signMessageECDSA(R.priv, bytes, R.type) : signMessageSchnorr(R.priv, bytes);
+      const sig = signDigest(S.alg, R.priv, R.type, bytes, raw);
       set({ sig, ae: false });
-      addLog({ kind: 'msg', main: S.mfmt === 'text' ? S.msg.slice(0, 120) : S.mfmt + ' message · ' + bytes.length + ' bytes', address: R.address, alg: S.alg, prefill: { alg: S.alg, mfmt: S.mfmt, msg: S.msg, vfmt: 'b64', sig: base64.encode(sig), who: S.alg === 'ecdsa' ? R.address : xpk }, sel });
+      logSignature({ raw, alg: S.alg, efmt, mfmt: S.mfmt, msg: S.msg, bytes, sig, address: R.address, who: S.alg === 'ecdsa' ? R.address : pubUsed, sel });
     } else {
       const sig = textToBytes(S.vsig, S.vfmt);
       if (!sig) return set({ res: { ok: false, why: 'The signature isn’t valid ' + (S.vfmt === 'hex' ? 'hex' : 'base64') + '.' } });
-      if (S.alg === 'ecdsa') set({ res: verifyMessageECDSA(who.trim(), bytes, sig) });
+      if (S.alg === 'ecdsa') set({ res: verifyDigest('ecdsa', who.trim(), bytes, sig, raw) });
       else {
         const k = who.trim();
-        set({ res: isHex(k) && k.length === 64 ? verifyMessageSchnorr(hex.decode(k), bytes, sig) : { ok: false, why: 'Paste the 32-byte x-only public key as 64 hex characters.' } });
+        set({ res: isHex(k) && k.length === 64 ? verifyDigest('schnorr', hex.decode(k), bytes, sig, raw) : { ok: false, why: 'Paste the 32-byte x-only public key as 64 hex characters.' } });
       }
     }
   };
-  const sigText = S.sig ? (S.sfmt === 'hex' ? hex.encode(S.sig) : base64.encode(S.sig)) : '';
+  // ECDSA signatures are kept as 65 bytes; DER is another view of the same r and s.
+  const shownSig = S.sig ? (S.alg === 'ecdsa' && efmt === 'der' ? toDER(S.sig) : S.sig) : null;
+  const sigText = shownSig ? (S.sfmt === 'hex' ? hex.encode(shownSig) : base64.encode(shownSig)) : '';
+  const vb = textToBytes(S.vsig, S.vfmt);
+  const vNote = !S.vsig.trim() ? (S.alg === 'ecdsa' ? 'ECDSA: 65 bytes (recoverable) or DER.' : 'Schnorr: 64 bytes.')
+    : !vb ? 'Not valid ' + (S.vfmt === 'hex' ? 'hex' : 'base64') + '.'
+      : S.alg === 'schnorr' ? (vb.length === 64 ? 'Read as 64 bytes.' : 'Schnorr needs 64 bytes; got ' + vb.length + '.')
+        : vb.length === 65 && vb[0] !== 0x30 ? 'Read as 65 bytes (recoverable).' : isDER(vb) ? 'Read as DER · ' + vb.length + ' bytes.' : 'ECDSA needs 65 bytes or DER; got ' + vb.length + ' bytes.';
+  const vBad = !!S.vsig.trim() && !/^Read as/.test(vNote);
   const res = S.res;
-  const compat = S.alg === 'ecdsa'
-    ? (isSign ? 'Classic Bitcoin signed message (BIP-137), 65 bytes. Electrum, Sparrow and most wallets verify it with just the address.' : 'Classic signed message (BIP-137). The public key is recovered from the signature and checked against the address.')
-    : (isSign ? 'BIP-340 Schnorr signature, 64 bytes, over the BIP-322 message hash. Share your public key with it: a verifier needs the key, not the address. Few wallets check this format yet.' : 'BIP-340 Schnorr. A Schnorr signature can’t reveal its key, so paste the 32-byte x-only public key of the signer.');
+  const thing = raw ? 'digest' : 'message';
+  const fmtChips = raw
+    ? <Chips label="Digest format" items={[['hex', 'Hex'], ['b64', 'Base64']]} value={S.dfmt} onChange={switchDig} />
+    : <Chips label="Message format" items={[['text', 'Text'], ['hex', 'Hex'], ['b64', 'Base64']]} value={S.mfmt} onChange={switchMsg} />;
+  const label = keyLabel(sel, R);
   return (
     <NavShell max={1040} gap={16}>
-      <TitleRow back="address" onBack={() => { setState({ sigPrefill: null }); go('address'); }} title="Sign or verify" />
-      <div style={{ display: 'flex', gap: '10px', alignItems: 'baseline', flexWrap: 'wrap' }}><span style={{ fontWeight: 600 }}>{sel.keyIdx !== undefined ? R.key.label || 'Key' : (sel.branch ? 'Change' : 'Receive') + ' #' + sel.i}</span><span class="mono muted" style={{ fontSize: '13px' }}>{shortAddr(R.address, 8, 6)}</span></div>
+      <TitleRow back="address" onBack={() => { setState({ sigPrefill: null }); go('address'); }} title="Sign or verify"
+        right={<button class="helpbtn" aria-label="How signing works" aria-haspopup="dialog" onClick={() => set({ help: true })}><span aria-hidden="true">?</span></button>} />
+      <div style={{ display: 'flex', gap: '10px', alignItems: 'baseline', flexWrap: 'wrap' }}><span style={{ fontWeight: 600 }}>{label}</span><span class="mono muted" style={{ fontSize: '13px' }}>{shortAddr(R.address, 8, 6)}</span></div>
       <Seg items={[['sign', 'Sign'], ['verify', 'Verify']]} value={S.tab} onChange={(t) => set({ tab: t, res: null })} />
       <div class="cols2">
         <div>
@@ -442,36 +520,45 @@ export function SignVerify() {
             <span class="flabel">Signature type</span>
             <div class="seg h34" style={{ gridTemplateColumns: '1fr 1fr', width: '200px' }}>{[['ecdsa', 'ECDSA'], ['schnorr', 'Schnorr']].map(([k, l]) => <button key={k} aria-pressed={S.alg === k ? 'true' : 'false'} class={S.alg === k ? 'on' : ''} onClick={() => set({ alg: k, who: null, sig: null, res: null })}>{l}</button>)}</div>
           </div>
-          {!isSign && <InField id="cr-who" label={S.alg === 'ecdsa' ? 'Address' : 'Public key (x-only, hex)'} value={who} onInput={(v) => set({ who: v, res: null })} note={S.alg === 'ecdsa' ? 'Prefilled with this address. Paste another to check someone else’s signature.' : 'Prefilled with this address’s key. Paste the signer’s key to check theirs.'} />}
-          <InField id="cr-msg" label="Message" textarea mono={S.mfmt !== 'text'} value={S.msg} onInput={(v) => set({ msg: v, msgErr: '', sig: null, res: null })} placeholder={{ text: 'Type the message', hex: '48656c6c6f…', b64: 'SGVsbG8…' }[S.mfmt]} bad={!!(S.msgErr || msgBad)} note={msgNote} noteCls={S.msgErr || msgBad ? 'err' : ''}
-            right={<Chips label="Message format" items={[['text', 'Text'], ['hex', 'Hex'], ['b64', 'Base64']]} value={S.mfmt} onChange={switchMsg} />} />
+          {!isSign && <InField id="cr-who" label={S.alg === 'ecdsa' ? 'Address' : 'Public key (x-only, hex)'} value={who} onInput={(v) => set({ who: v, res: null })} />}
+          <InField id="cr-msg" label={raw ? 'Raw hash (32 bytes)' : 'Message'} textarea mono={fmt !== 'text'} value={raw ? S.dig : S.msg}
+            onInput={(v) => set(raw ? { dig: v, sig: null, res: null } : { msg: v, msgErr: '', sig: null, res: null })}
+            head={<Chips label="What to sign" items={[['msg', 'Message'], ['raw', 'Raw hash']]} value={S.what} onChange={(k) => k !== S.what && set({ what: k, sig: null, res: null, efmt: null, msgErr: '', who: null })} />}
+            placeholder={raw ? (S.dfmt === 'hex' ? '64 hex characters' : '44 Base64 characters') : { text: 'Type the message', hex: '48656c6c6f…', b64: 'SGVsbG8…' }[S.mfmt]}
+            bad={msgNoteCls === 'err'} note={msgNote} noteCls={msgNoteCls} right={fmtChips}
+            spec={raw ? { title: 'Raw hash (32 bytes)', binary: true, onValue: (v) => set({ dig: v instanceof Uint8Array ? (v.length === 32 ? bytesToText(v, S.dfmt) : new TextDecoder().decode(v).trim()) : String(v).trim(), sig: null, res: null }) } : undefined} />
           {!isSign && (
             <>
-              <InField id="cr-sig" label="Signature" textarea value={S.vsig} onInput={(v) => set({ vsig: v, res: null })} right={<Chips label="Signature format" items={[['hex', 'Hex'], ['b64', 'Base64']]} value={S.vfmt} onChange={(k) => set({ vfmt: k, res: null })} />} />
-              <div class="resultbox" style={{ border: res ? (res.ok ? '2px solid var(--ok)' : '2px solid var(--danger)') : '1px dashed var(--line2)' }}>
+              <InField id="cr-sig" label="Signature" textarea value={S.vsig} onInput={(v) => set({ vsig: v, res: null })} bad={vBad} note={vNote} noteCls={vBad ? 'err' : ''}
+                right={<Chips label="Signature format" items={[['hex', 'Hex'], ['b64', 'Base64']]} value={S.vfmt} onChange={(k) => set({ vfmt: k, res: null })} />} />
+              <div class="resultbox" role="status" style={{ border: res ? (res.ok ? '2px solid var(--ok)' : '2px solid var(--danger)') : '1px dashed var(--line2)' }}>
                 <b style={{ color: res ? (res.ok ? 'var(--ok)' : 'var(--danger)') : 'var(--muted)' }}>{res ? (res.ok ? 'Valid ' + (S.alg === 'ecdsa' ? 'ECDSA' : 'Schnorr') + ' signature' : 'Not valid') : 'Not checked yet'}</b>
-                <span class="small">{res ? (res.ok ? (S.alg === 'ecdsa' ? 'Signed by the key of this address. The message is exactly as signed.' : 'Signed by this public key. The message is exactly as signed.') : res.why && res.why !== 'mismatch' ? res.why : 'The signature doesn’t match this message and ' + (S.alg === 'ecdsa' ? 'address' : 'key') + '. Check the signature type and that the message format is the one that was signed.') : 'Click Verify. Works offline, no private key needed.'}</span>
+                {res && <span class="small">{res.ok ? (S.alg === 'ecdsa' ? 'Signed by the key of this address. The ' + thing + ' is exactly as signed.' : 'Signed by this public key. The ' + thing + ' is exactly as signed.')
+                  : res.why && res.why !== 'mismatch' ? res.why : 'The signature doesn’t match this ' + thing + ' and ' + (S.alg === 'ecdsa' ? 'address' : 'key') + '. Check the signature type and ' + (raw ? 'that you pasted the digest that was signed.' : 'that the message format is the one that was signed.')}</span>}
               </div>
             </>
           )}
         </div>
         <div>
-          {isSign && (S.sig ? (
-            <OutField label="Signature" value={sigText} extra={null} note={S.ae ? 'Signed with anti-exfil: its nonce is the final nonce from the host’s data. The host checks it with R and its data.' : null} spec={{ title: (S.alg === 'ecdsa' ? 'ECDSA' : 'Schnorr') + ' signature · ' + (S.sfmt === 'hex' ? 'hex' : 'base64'), value: sigText, file: 'signature-' + S.alg + (S.sfmt === 'hex' ? '.hex' : '.txt') }} />
-          ) : <div class="stack"><span class="flabel">Signature</span><div class="infoline">Click Sign message. The signature shows here, ready to export as text, QR or a file.</div></div>)}
-          {isSign && S.sig && <div style={{ marginTop: '-6px' }}><Chips label="Signature format" items={[['hex', 'Hex'], ['b64', 'Base64']]} value={S.sfmt} onChange={(k) => set({ sfmt: k })} /></div>}
-          {isSign && S.alg === 'schnorr' && <OutField label="Your public key (x-only)" value={xpk} spec={{ title: 'Public key (x-only)', value: xpk, file: 'public-key-xonly.txt' }} note="Send it along with the signature: Schnorr verifiers need it." />}
-          <span class="note">{compat}</span>
+          {isSign && S.sig && (
+            <>
+              <OutField label={'Signature' + (S.ae ? ' · anti-exfil' : '')} value={sigText}
+                right={<span class="chiprow">{S.alg === 'ecdsa' && <Chips label="ECDSA format" items={[['rec', '65 bytes (recoverable)'], ['der', 'DER']]} value={efmt} onChange={(k) => set({ efmt: k })} />}<Chips label="Signature encoding" items={[['hex', 'Hex'], ['b64', 'Base64']]} value={S.sfmt} onChange={(k) => set({ sfmt: k })} /></span>}
+                spec={{ title: (S.alg === 'ecdsa' ? 'ECDSA' + (efmt === 'der' ? ' DER' : '') : 'Schnorr') + ' signature · ' + (S.sfmt === 'hex' ? 'hex' : 'base64'), value: sigText, file: 'signature-' + S.alg + (S.alg === 'ecdsa' && efmt === 'der' ? '-der' : '') + (S.sfmt === 'hex' ? '.hex' : '.txt') }} />
+              <OutField label="Public key used" value={pubUsed} right={<span class="note">{S.alg === 'ecdsa' ? 'compressed · 33 bytes' : 'x-only · 32 bytes'}</span>}
+                spec={{ title: 'Public key · ' + (S.alg === 'ecdsa' ? 'compressed' : 'x-only'), value: pubUsed, file: 'public-key.txt' }} />
+            </>
+          )}
         </div>
       </div>
       {isSign ? (
         <div class="btnrow">
-          <button class="btn-primary" disabled={msgBad} onClick={run}>{S.sig ? 'Sign again' : 'Sign message'}</button>
+          <button class="btn-primary" disabled={msgBad} onClick={run}>{S.sig ? 'Sign again' : raw ? 'Sign digest' : 'Sign message'}</button>
           <button class="btn-secondary bold" disabled={msgBad} title="The host adds its own randomness to the nonce, so this signer can’t leak your key through the signature"
-            onClick={() => startMessageAntiExfil({ alg: S.alg, type: R.type, bytes, mfmt: S.mfmt, msg: S.msg, address: R.address, xpk, sel,
-              label: sel.keyIdx !== undefined ? R.key.label || 'Key' : (sel.branch ? 'Change' : 'Receive') + ' #' + sel.i })}>Anti-exfil signing</button>
+            onClick={() => startMessageAntiExfil({ raw, alg: S.alg, type: R.type, bytes, efmt, mfmt: S.mfmt, msg: S.msg, dfmt: S.dfmt, dig: S.dig, address: R.address, who: S.alg === 'ecdsa' ? R.address : pubUsed, sel, label })}>Anti-exfil signing</button>
         </div>
       ) : <button class="btn-primary" disabled={msgBad} onClick={run}>Verify</button>}
+      {S.help && <SignHelp onClose={() => set({ help: false })} />}
     </NavShell>
   );
 }

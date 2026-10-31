@@ -1,4 +1,4 @@
-// Anti-exfil signing: nonce derivation, host checks, and message signatures.
+// Anti-exfil signing (nonce derivation, host checks, message signatures) and raw-digest signing.
 import { test } from 'node:test';
 import { expect } from './expect.js';
 import { secp256k1, schnorr } from '@noble/curves/secp256k1.js';
@@ -7,7 +7,9 @@ import { utf8, hex } from '../src/core/util.js';
 import * as A from '../src/core/antiexfil.js';
 import { messageSignerNonce, signMessageAntiExfil, verifyMessageECDSA, verifyMessageSchnorr, messageHash, bip322Hash } from '../src/core/message.js';
 import { walletFromMnemonic, account, addressAt } from '../src/core/wallet.js';
-import { xonly } from '../src/core/hd.js';
+import { xonly, decodeAddress } from '../src/core/hd.js';
+import { signDigest, verifyDigest, toDER, isDER, signingPub, signingKey } from '../src/core/message.js';
+import { taprootTweakPrivKey } from '@scure/btc-signer/utils.js';
 
 const priv = sha256(utf8.encode('anti-exfil test key'));
 const msg = sha256(utf8.encode('message'));
@@ -71,8 +73,78 @@ test('anti-exfil message signatures verify as BIP-137 and BIP-340', () => {
     expect(verifyMessageECDSA(a.address, m, r.sig).ok).toBe(true);
     expect(A.hostVerifyECDSA(r.sig.subarray(1), messageHash(m), node.publicKey, R, data)).toBe(true);
   }
-  const node = W.root.derive("m/86'/0'/0'/0/0");
+  // Taproot: signed with the address key (tweaked), the 32 bytes inside the bc1p address.
+  const ta = addressAt(account(W, 'tr', 'main', 0), 'tr', 'main', 0, 0);
+  const node = W.root.derive(ta.path);
+  const Q = decodeAddress(ta.address).hash;
   const r = signMessageAntiExfil('schnorr', node.privateKey, m, 'tr', c, data);
-  expect(verifyMessageSchnorr(xonly(node.publicKey), m, r.sig).ok).toBe(true);
-  expect(A.hostVerifySchnorr(r.sig, bip322Hash(m), xonly(node.publicKey), messageSignerNonce('schnorr', node.privateKey, m, c), data)).toBe(true);
+  expect(verifyMessageSchnorr(Q, m, r.sig).ok).toBe(true);
+  expect(A.hostVerifySchnorr(r.sig, bip322Hash(m), Q, messageSignerNonce('schnorr', node.privateKey, m, c, { type: 'tr' }), data)).toBe(true);
+});
+
+// ---- raw 32-byte digests and DER (Sign or verify, "Raw hash") ----
+
+test('raw digest signing: ECDSA signs the 32 bytes as given, 65 bytes and DER both verify', () => {
+  const W = walletFromMnemonic('abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'.split(' '), '');
+  const d = sha256(utf8.encode('some sighash'));
+  for (const type of ['wpkh', 'pkh', 'shwpkh']) {
+    const a = addressAt(account(W, type, 'main', 0), type, 'main', 0, 0);
+    const k = W.root.derive(a.path).privateKey;
+    const sig = signDigest('ecdsa', k, type, d, true);
+    expect(sig.length).toBe(65);
+    // The plain RFC 6979 signature over exactly these bytes: no prefix, no hashing.
+    const plain = secp256k1.sign(d, k, { prehash: false, lowS: true });
+    expect(hex.encode(sig.subarray(1))).toBe(hex.encode(plain));
+    const der = toDER(sig);
+    expect(isDER(der)).toBe(true);
+    expect(secp256k1.verify(secp256k1.Signature.fromBytes(der, 'der').toBytes('compact'), d, signingPub('ecdsa', k, type, true), { prehash: false })).toBe(true);
+    expect(verifyDigest('ecdsa', a.address, d, sig, true).ok).toBe(true);
+    expect(verifyDigest('ecdsa', a.address, d, der, true).ok).toBe(true);
+    // DER with the transaction sighash byte appended still reads.
+    expect(verifyDigest('ecdsa', a.address, d, new Uint8Array([...der, 1]), true).ok).toBe(true);
+    // Not the same as a message signature over those bytes.
+    expect(verifyDigest('ecdsa', a.address, d, sig, false).ok).toBe(false);
+    // Another digest fails.
+    expect(verifyDigest('ecdsa', a.address, sha256(d), der, true).ok).toBe(false);
+  }
+  expect(() => signDigest('ecdsa', new Uint8Array(32).fill(1), 'wpkh', new Uint8Array(31), true)).toThrow(/exactly 32 bytes/);
+});
+
+test('message signatures also verify as DER', () => {
+  const W = walletFromMnemonic('abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'.split(' '), '');
+  const a = addressAt(account(W, 'wpkh', 'main', 0), 'wpkh', 'main', 0, 0);
+  const k = W.root.derive(a.path).privateKey;
+  const m = utf8.encode('hello');
+  const sig = signDigest('ecdsa', k, 'wpkh', m, false);
+  expect(verifyMessageECDSA(a.address, m, sig).ok).toBe(true);
+  expect(verifyMessageECDSA(a.address, m, toDER(sig)).ok).toBe(true);
+  expect(verifyMessageECDSA(a.address, utf8.encode('hellp'), toDER(sig)).ok).toBe(false);
+});
+
+test('Schnorr on a Taproot address signs with the address key (tweaked), raw and message', () => {
+  const W = walletFromMnemonic('abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'.split(' '), '');
+  const a = addressAt(account(W, 'tr', 'main', 0), 'tr', 'main', 0, 0);
+  const k = W.root.derive(a.path).privateKey;
+  const d = sha256(utf8.encode('taproot sighash'));
+  const pub = signingPub('schnorr', k, 'tr', true);
+  // The tweaked key is the address's output key: bc1p… encodes exactly these 32 bytes.
+  expect(hex.encode(pub)).toBe(hex.encode(schnorr.getPublicKey(taprootTweakPrivKey(k))));
+  const sig = signDigest('schnorr', k, 'tr', d, true);
+  expect(schnorr.verify(sig, d, pub)).toBe(true);
+  expect(verifyDigest('schnorr', pub, d, sig, true).ok).toBe(true);
+  // Message mode uses the same key: a signature for this address, as BIP-322 does.
+  expect(hex.encode(signingPub('schnorr', k, 'tr', false))).toBe(hex.encode(pub));
+  const m = utf8.encode('hello');
+  expect(verifyMessageSchnorr(pub, m, signDigest('schnorr', k, 'tr', m, false)).ok).toBe(true);
+  expect(verifyMessageSchnorr(xonly(a.pub), m, signDigest('schnorr', k, 'tr', m, false)).ok).toBe(false);
+  // The key is the one inside the bc1p address.
+  expect(hex.encode(pub)).toBe(hex.encode(decodeAddress(a.address).hash));
+  // Not a Taproot address: no tweak.
+  expect(hex.encode(signingKey('schnorr', k, 'wpkh', true))).toBe(hex.encode(k));
+  // Anti-exfil signs the same digest with the same key.
+  const R = messageSignerNonce('schnorr', k, d, c, { raw: true, type: 'tr' });
+  const r = signMessageAntiExfil('schnorr', k, d, 'tr', c, data, { raw: true });
+  expect(A.hostVerifySchnorr(r.sig, d, pub, R, data)).toBe(true);
+  const re = signMessageAntiExfil('ecdsa', k, d, 'tr', c, data, { raw: true });
+  expect(A.hostVerifyECDSA(re.sig.subarray(1), d, secp256k1.getPublicKey(k, true), messageSignerNonce('ecdsa', k, d, c, { raw: true }), data)).toBe(true);
 });

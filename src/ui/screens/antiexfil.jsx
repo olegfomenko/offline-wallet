@@ -14,7 +14,8 @@ import { textToBytes, bytesToText } from '../../core/encoding.js';
 import { messageSignerNonce, signMessageAntiExfil } from '../../core/message.js';
 import { prepareAntiExfil, wipeAntiExfil, antiExfilNonces, signPsbtAntiExfil, psbtJSON } from '../../core/psbt.js';
 import { finalNonce, dataMatches } from '../../core/antiexfil.js';
-import { hex, base64 } from '../../core/util.js';
+import { hex } from '../../core/util.js';
+import { logSignature } from './addresses.jsx';
 
 const STEPS = {
   1: ['Host commitment', 'The host (your online wallet or a second device) picks random data and gives you only its SHA-256. You enter that hash here before seeing anything from this signer.'],
@@ -24,7 +25,7 @@ const STEPS = {
 };
 const ALG_NAME = { ecdsa: 'ECDSA', schnorr: 'Schnorr (BIP340)' };
 
-/** Open anti-exfil signing for a message. `m` = { alg, type, bytes, mfmt, msg, label, address, xpk, sel }. */
+/** Open anti-exfil signing for a message or raw digest. `m` = { raw, alg, type, bytes, efmt, mfmt, msg, dfmt, dig, label, address, who, sel }. */
 export function startMessageAntiExfil(m) {
   setState({ ae: { kind: 'msg', ...m } });
   go('anti-exfil-msg');
@@ -87,7 +88,7 @@ export function AntiExfil() {
   let rErr = '';
   if (step >= 2 && ok1) {
     try {
-      R = isTx ? antiExfilNonces(ae.prep, comB) : [messageSignerNonce(ae.alg, msgPriv(), ae.bytes, comB[0])];
+      R = isTx ? antiExfilNonces(ae.prep, comB) : [messageSignerNonce(ae.alg, msgPriv(), ae.bytes, comB[0], { raw: ae.raw, type: ae.type })];
     } catch (e) { rErr = e.message; }
   }
   const fin = step === 4 && ok3 && R.length ? R.map((r, i) => finalNonce(r, dataB[i])) : [];
@@ -130,10 +131,9 @@ export function AntiExfil() {
         patch('tx', { signed: res, json });
         leave('signed-export');
       } else {
-        const r = signMessageAntiExfil(ae.alg, msgPriv(), ae.bytes, ae.type, comB[0], dataB[0]);
-        addLog({ kind: 'msg', main: ae.mfmt === 'text' ? ae.msg.slice(0, 120) : ae.mfmt + ' message · ' + ae.bytes.length + ' bytes', address: ae.address, alg: ae.alg, ae: true,
-          prefill: { alg: ae.alg, mfmt: ae.mfmt, msg: ae.msg, vfmt: 'b64', sig: base64.encode(r.sig), who: ae.alg === 'ecdsa' ? ae.address : ae.xpk }, sel: ae.sel });
-        setState({ sigDone: { alg: ae.alg, mfmt: ae.mfmt, msg: ae.msg, sig: r.sig, ae: true } });
+        const r = signMessageAntiExfil(ae.alg, msgPriv(), ae.bytes, ae.type, comB[0], dataB[0], { raw: ae.raw });
+        logSignature({ ...ae, sig: r.sig, ae: true });
+        setState({ sigDone: { what: ae.raw ? 'raw' : 'msg', alg: ae.alg, efmt: ae.efmt, mfmt: ae.mfmt, msg: ae.msg, dfmt: ae.dfmt, dig: ae.dig, sig: r.sig, ae: true } });
         leave('sign-verify');
       }
     } catch (e) {
@@ -144,7 +144,7 @@ export function AntiExfil() {
   const shown = isTx ? (() => { const a = st.tx.analysis; return a.sentExt > 0n ? a.sentExt : a.toSelf > 0n ? a.toSelf : a.outSum; })() : null;
   const what = isTx
     ? 'Transaction · ' + st.tx.analysis.inputs.length + ' input' + (st.tx.analysis.inputs.length > 1 ? 's' : '') + ' · ' + fmtAmt(shown, unit)
-    : 'Message · ' + ae.label;
+    : (ae.raw ? 'Raw digest · ' : 'Message · ') + ae.label;
   const next = { 1: ok1, 2: !rErr && R.length === N, 3: ok3, 4: fin.length === N }[step];
   const plural = N > 1;
 

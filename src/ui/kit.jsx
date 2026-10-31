@@ -209,14 +209,15 @@ export function OutField({ label, value, spec, note, noteCls = '', priv, childre
  * `kb`: { open: () => void, what, isOpen } adds the on-screen keyboard button (and the sheet option).
  * Single-line fields put it before the import button; a text area stacks import above it.
  */
-export function InField({ label, priv, value, onInput, placeholder, note, noteCls = '', textarea, password, bad, spec, mono = true, rows, id, right, kb }) {
+/** `head` replaces the visible label (e.g. with a switch); `label` still names the field for screen readers. */
+export function InField({ label, priv, value, onInput, placeholder, note, noteCls = '', textarea, password, bad, spec, mono = true, rows, id, right, kb, head }) {
   const cls = (textarea ? 'textarea' : 'input') + (bad ? ' bad' : '') + (mono ? '' : ' sans');
   const common = { id, value, placeholder, spellcheck: false, autocapitalize: 'none', autocomplete: 'off', 'aria-label': label, onInput: (e) => onInput(e.currentTarget.value) };
   const imp = <ImportBtn spec={{ title: label, priv, ...spec, kb: kb ? kb.open : undefined, onValue: spec && spec.onValue ? spec.onValue : (v) => onInput(typeof v === 'string' ? v : new TextDecoder().decode(v)), focusId: id }} />;
   const key = kb && <KbdButton what={kb.what} open={kb.isOpen} onClick={kb.open} />;
   return (
     <div class="field">
-      <div class="fhead"><span class="flabel">{label}{priv && <PrivChip />}</span><span>{right}</span></div>
+      <div class="fhead">{head || <span class="flabel">{label}{priv && <PrivChip />}</span>}<span>{right}</span></div>
       <div class="fbody">
         {textarea ? <textarea class={cls} rows={rows} {...common} /> : <input class={cls} type={password ? 'password' : 'text'} {...common} />}
         {kb ? (textarea ? <div class="fbtns col">{imp}{key}</div> : <>{key}{imp}</>) : imp}

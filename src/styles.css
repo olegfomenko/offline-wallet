@@ -201,6 +201,17 @@ label.wordcell input { flex: 1 1 auto; min-width: 0; width: 100%; height: 32px; 
 .infoline { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line2); background: var(--surface); font-size: 13px; line-height: 1.5; color: var(--muted); }
 .infoline svg { flex-shrink: 0; color: var(--text); }
 /* anti-exfil signing */
+/* Sign or verify: help button and panel */
+.helpbtn { width: 44px; height: 44px; margin-right: -10px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--text); cursor: pointer; padding: 0; }
+.helpbtn span { width: 26px; height: 26px; border-radius: 50%; border: 2px solid currentColor; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font: 700 15px var(--sans); }
+.helpbtn:hover { color: var(--accent-hi); }
+.helpdlg { max-width: 560px; gap: 18px; }
+.helpdlg h2.ttl { margin: 0; font-size: 18px; font-weight: 700; }
+.helpsec { display: flex; flex-direction: column; gap: 8px; }
+.helpsec h3 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.helpsec ul { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 1.5; }
+.helpsec b { font-weight: 600; }
+.chiprow { display: inline-flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 /* secp256k1 calculator */
 .gbtn { height: 30px; padding: 0 10px; border: 1px solid var(--primary); background: var(--primary); color: var(--on-primary); font: 600 12px var(--sans); cursor: pointer; }
 .gbtn.on { border-color: var(--line2); background: var(--line); color: var(--muted); }

@@ -63,6 +63,22 @@ as dots in the preview until you press Show. The physical keyboard keeps working
   input of this wallet signs. If all inputs are signed, the final transaction hex and txid are shown
   too.
 
+## Messages and raw hashes
+
+**Addresses → an address → Sign / verify** signs with that address's key. The **?** button explains
+every option.
+
+- **Message:** ECDSA gives a classic Bitcoin signed message (BIP-137, prefixed and hashed). Schnorr
+  is BIP-340 over the BIP-322 message hash. Neither can ever be a transaction signature.
+- **Raw hash:** signs exactly the 32 bytes you enter, with no prefix and no hashing, for sighashes
+  or digests your own software computed. This can authorize spending the coins on that address.
+- **Taproot:** Schnorr on a Taproot address signs with the address's own key, the tweaked output
+  key (BIP86), in both modes, as a key-path spend and BIP-322 need. "Public key used" shows it.
+- **ECDSA format:** 65 bytes (recoverable; the default for messages) or DER (the default for raw
+  hashes). For a transaction input, append the sighash byte (`01` for SIGHASH_ALL).
+- **Verify** reads 65-byte and DER signatures (DER also with a trailing sighash byte) against an
+  address, and Schnorr signatures against an x-only key.
+
 ## Anti-exfil signing
 
 A faulty or malicious signer could leak your key through the nonces in its signatures. Anti-exfil
@@ -101,7 +117,7 @@ EntropyLab uses as test oracles.
 | HMAC-SHA512 | BIP32 child key derivation, master key from seed | `@noble/hashes/hmac` via `@scure/bip32` | RFC 2104, BIP32 |
 | PBKDF2-HMAC-SHA512 (2048 rounds) | BIP39 seed from words and passphrase; custom words, Electrum-compatible | `@noble/hashes/pbkdf2` via `@scure/bip39`, and directly | RFC 8018, BIP39 |
 | RIPEMD-160 (HASH160) | P2PKH, P2WPKH and P2SH hashes, BIP32 fingerprints | `@noble/hashes/legacy` | — |
-| secp256k1 ECDSA, RFC 6979 nonces, low-S, low-R | Signing legacy, nested and native SegWit inputs; BIP-137 message signatures with public key recovery | `@noble/curves/secp256k1` (via `@scure/btc-signer` for PSBTs) | SEC 2, RFC 6979, BIP62/137 |
+| secp256k1 ECDSA, RFC 6979 nonces, low-S, low-R | Signing legacy, nested and native SegWit inputs; BIP-137 message signatures with public key recovery; raw 32-byte digests (65 bytes or DER) | `@noble/curves/secp256k1` (via `@scure/btc-signer` for PSBTs) | SEC 2, RFC 6979, BIP62/137 |
 | Schnorr signatures | Taproot key-path signing; Schnorr message signatures | `@noble/curves/secp256k1` `schnorr` | BIP340 |
 | SHA-256, SHA-512, secp256k1 point addition, doubling and scalar multiplication | Settings → Tools calculators | `@noble/hashes/sha2`, `@noble/curves/secp256k1` (via `calc.js`) | FIPS 180-4, SEC 2 |
 | Anti-exfil nonces: SHA-256 commitment, RFC 6979 / BIP340 nonce with the commitment as extra data, tweak `R + SHA256(R‖data)·G`, signing with the tweaked nonce | Anti-exfil signing of messages and PSBT inputs | own (`antiexfil.js`) on `@noble/curves` (point and scalar math, HMAC-DRBG) and `@noble/hashes` | Blockstream anti-exfil, RFC 6979, BIP340 |
@@ -156,13 +172,14 @@ To turn Pages on once: in the repository's **Settings → Pages**, set **Source*
 ## Test
 
 ```sh
-npm test               # 61 tests on node:test: BIP32/39/44/49/84/86 vectors, SLIP-132, BIP380, WIF,
+npm test               # 64 tests on node:test: BIP32/39/44/49/84/86 vectors, SLIP-132, BIP380, WIF,
                        # BIP38, BIP-137/340 messages, UR (bc-ur reference vectors), BBQr (Coinkite's
                        # real scan), Base43, QR round trips, PSBT sign/finalize for all four script
                        # types, PSBT attack regressions, private-key restore round trips, and the
                        # on-screen keyboard logic (layouts, BIP39 letters and suggestions, shuffle),
                        # and anti-exfil signing (nonces match RFC 6979 / BIP340, host checks,
                        # BIP-137/340 messages, PSBTs of all four script types and mixed inputs),
+                       # raw-digest signing (DER, 65 bytes, Taproot tweaked key),
                        # and the Settings calculators (SHA-256/512 vectors, secp256k1 point math)
 npm run fixtures       # sample PSBTs for the public test seed "abandon … about" in test/data/
 ```
