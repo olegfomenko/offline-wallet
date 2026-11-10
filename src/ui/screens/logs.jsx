@@ -2,6 +2,7 @@
 import { h, Fragment } from 'preact';
 import { useState } from 'preact/hooks';
 import { go } from '../router.js';
+import { has } from '../app.js';
 import { setState, patch, useStore } from '../store.js';
 import { NavShell, I, fmtTime } from '../kit.jsx';
 import { download } from '../io.js';
@@ -78,7 +79,7 @@ export function Signed() {
   return (
     <NavShell max={1040} gap={16}>
       <h1>Signed</h1>
-      <span class="small">Transactions, messages and raw digests signed on this device, newest first. It can't see the network, so it never knows if a transaction was broadcast. Times use the device clock.</span>
+      <span class="small">{has('psbt') ? 'Transactions, messages and raw digests' : 'Messages and raw hashes'} signed on this device, newest first. It can't see the network, so it never knows if a transaction was broadcast. Times use the device clock.</span>
       <div class="cols2">
         <div>
           <div class="stack">

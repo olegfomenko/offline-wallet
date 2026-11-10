@@ -2,9 +2,12 @@
 import { useEffect, useReducer } from 'preact/hooks';
 
 const subs = new Set();
+let start = 'welcome';
+/** The screen an empty hash means: Welcome, or the Inspector's or Tools' home. */
+export function setStart(name) { start = name; }
 export function current() {
   const h = (location.hash || '').replace(/^#\/?/, '');
-  return h || 'welcome';
+  return h || start;
 }
 export function go(name) {
   if (current() === name) { for (const f of subs) f(); return; }

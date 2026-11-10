@@ -1,12 +1,15 @@
 // Signing: which wallet made it → load → review (with every check explained) → sign → export.
+// The same screens serve the PSBT Inspector (no wallet): it reviews with a watch-only key or none,
+// and signs input by input with signatures made elsewhere (Sign inputs).
 import { h, Fragment } from 'preact';
 import { useState, useEffect, useMemo } from 'preact/hooks';
 import { go } from '../router.js';
+import { app, has } from '../app.js';
 import { getState, setState, patch, useStore, addLog, signNetOf } from '../store.js';
-import { NavShell, TitleRow, Seg, Spacer, OutField, ExportBtn, InField, I, Card, Addr, fmtAmt, shortAddr, KV, Section } from '../kit.jsx';
+import { NavShell, TitleRow, Seg, Spacer, OutField, ExportBtn, InField, I, Card, Addr, fmtAmt, shortAddr, KV, Section, HelpDialog, HelpSec, HelpButton, openExport } from '../kit.jsx';
 import { classify, classifyPayload, psbtQRFrames } from '../../core/transport.js';
-import { parsePsbt, analyzePsbt, signPsbt, psbtJSON, fmtPct, fmtRate, fmtDate } from '../../core/psbt.js';
-import { base64 } from '../../core/util.js';
+import { parsePsbt, analyzePsbt, signPsbt, psbtJSON, fmtPct, fmtRate, fmtDate, inferNet, watchWallet, prepareSignInputs, checkInputSignature, applyInputSignatures } from '../../core/psbt.js';
+import { base64, hex, isHex } from '../../core/util.js';
 import { NETS } from '../../core/hd.js';
 import { startTxAntiExfil } from './antiexfil.jsx';
 
@@ -94,24 +97,41 @@ export function LoadTransaction() {
     note = [describeHow(tx.how, r), r.format, n].filter(Boolean).join(' · ');
   } else if (r && r.kind === 'partial') { note = r.format + ': ' + r.got + ' of ' + r.total + ' parts so far. Scan or paste the rest.'; }
   else if (r && r.kind !== 'empty') { note = 'This doesn’t look like a PSBT.'; noteCls = 'err'; }
+  // Inspector: an optional watch-only key (public) proves inputs and change.
+  const inspector = has('inspector');
+  const watchText = (st.watch || '').trim();
+  let watch = null, watchErr = '';
+  if (inspector && watchText) { try { watch = watchWallet(watchText); } catch (e) { watchErr = e.message; } }
   const review = () => {
     setErr('');
     try {
       const t = parsePsbt(r.bytes);
-      const w = getState().wallet;
-      const a = analyzePsbt(t, w, { net: signNetOf(st), feeLimitPct: st.settings.feeLimit });
-      patch('tx', { txObj: t, analysis: a, acks: {}, signed: null, bytes: r.bytes, format: r.format });
+      let a;
+      if (inspector) {
+        if (watchErr) throw new Error('Fix the watch-only key, or clear it to review without one.');
+        a = analyzePsbt(t, watch, { net: watch ? watch.net : inferNet(t), feeLimitPct: st.settings.feeLimit });
+      } else {
+        a = analyzePsbt(t, getState().wallet, { net: signNetOf(st), feeLimitPct: st.settings.feeLimit });
+      }
+      patch('tx', { txObj: t, analysis: a, acks: {}, signed: null, sigs: null, bytes: r.bytes, format: r.format });
       go('review');
     } catch (e) { setErr(e.message); }
   };
   const isPsbt = r && r.kind === 'psbt' && noteCls !== 'err';
   return (
     <NavShell max={760} gap={18}>
-      <TitleRow back="source" title="Load transaction to sign" />
+      <TitleRow back={inspector ? 'inspector' : 'source'} title="Load transaction to sign" />
       <span class="small">Your online wallet builds the transaction and shows it as a QR, text or file. Bring it here with the import button, paste it, or drop the file on this page.</span>
       <InField id="psbt" label="Transaction (PSBT)" textarea value={tx.text || ''} onInput={(v) => { if (v.trim()) loadInput(v, ''); else patch('tx', { text: '', input: null }); }}
         placeholder="cHNidP8B… · hex · ur:crypto-psbt/… · B$…" note={note} noteCls={noteCls}
         spec={{ title: 'Transaction (PSBT)', multi: true, binary: true, accept: '.psbt,.txt,.txn,application/octet-stream,text/plain', onValue: (v, how) => loadInput(v, how) }} />
+      {inspector && (
+        <InField id="watch" label="Watch-only key (optional)" textarea rows={2} value={st.watch || ''} onInput={(v) => setState({ watch: v })}
+          placeholder="xpub… · zpub… · wpkh([73c5da0a/84h/0h/0h]xpub…)" bad={!!watchErr}
+          note={!watchText ? 'Public only. Lets the review prove your inputs and change.' : watchErr || '✓ ' + watch.format + ' · used to prove inputs and change'}
+          noteCls={!watchText ? '' : watchErr ? 'err' : 'ok'}
+          spec={{ title: 'Watch-only key', onValue: (v) => setState({ watch: typeof v === 'string' ? v.trim() : new TextDecoder().decode(v).trim() }) }} />
+      )}
       <div class="card">
         <button class="toggleline" style={{ background: 'none', border: 'none', color: 'var(--text)', width: '100%', fontFamily: 'var(--sans)' }} aria-expanded={manual ? 'true' : 'false'} onClick={() => setManual(!manual)}><span>Accepted formats</span><span>{manual ? '−' : '+'}</span></button>
         {manual && (
@@ -165,15 +185,15 @@ export function NotAPsbt() {
       <Spacer />
       <div class="btnrow">
         <button class="btn-primary" onClick={() => go('load')}>Load the transaction</button>
-        {(r.kind === 'bip21' || r.kind === 'address') && <button class="btn-secondary bold" onClick={() => go('check-address')}>Check if this address is mine</button>}
+        {has('wallet') && (r.kind === 'bip21' || r.kind === 'address') && <button class="btn-secondary bold" onClick={() => go('check-address')}>Check if this address is mine</button>}
       </div>
     </NavShell>
   );
 }
 
 function OutputRow({ o, unit }) {
-  const kindLabel = { external: 'External', change: 'Change', mine: 'Yours · not change', unusual: 'Yours · unusual path', data: 'Data' }[o.kind];
-  const sub = o.kind === 'external' ? 'Not in this wallet.' : o.kind === 'change' ? 'Verified · ' + (o.own.path || o.own.label || 'single key') : o.kind === 'mine' ? 'Receive #' + o.own.index + ' · ' + o.own.path : o.kind === 'unusual' ? 'Derived from this wallet · ' + o.own.path : null;
+  const kindLabel = { external: 'External', change: o.unverified ? 'Change?' : 'Change', mine: 'Yours · not change', unusual: 'Yours · unusual path', data: 'Data' }[o.kind];
+  const sub = o.kind === 'external' ? 'Not in this wallet.' : o.kind === 'change' ? (o.unverified ? 'Not checked · ' : 'Verified · ') + (o.own.path || o.own.label || 'single key') : o.kind === 'mine' ? 'Receive #' + o.own.index + ' · ' + o.own.path : o.kind === 'unusual' ? 'Derived from this wallet · ' + o.own.path : null;
   return (
     <div class="outrow">
       <div class="kv"><span class="muted">#{o.n} · <b>{kindLabel}</b> · {o.scriptName}</span><span class="mono">{fmtAmt(o.amount, unit, false)}</span></div>
@@ -224,9 +244,12 @@ export function Review() {
   const st = useStore();
   const { tx, settings } = st;
   const [details, setDetails] = useState(false);
+  const [help, setHelp] = useState(false);
   const [err, setErr] = useState('');
   const a = tx.analysis;
   if (!a) { go('load'); return null; }
+  const inspector = has('inspector');
+  const reject = () => { setState({ tx: { source: tx.source } }); go(app().home); };
   const unit = settings.unit;
   const acks = tx.acks || {};
   const allAck = a.confirm.every((c) => acks[c.id]);
@@ -252,7 +275,7 @@ export function Review() {
     : a.confirm.length ? 'Confirm each item below to sign.' : null;
   return (
     <NavShell max={1120} gap={12}>
-      <TitleRow back="load" title="Review transaction" />
+      <TitleRow back="load" title="Review transaction" right={<HelpButton label="What the review checks" onClick={() => setHelp(true)} />} />
       <div class="cols2">
         <div>
           <div class="stack" style={{ gap: '2px' }}>
@@ -292,7 +315,7 @@ export function Review() {
             <>
               <Section title="Before you sign">
                 <Card>{a.notes.map((n) => (
-                  <div key={n.text} class="check"><span class="mark" style={{ color: n.mark === '✓' ? 'var(--text)' : 'var(--accent)' }}>{n.mark}</span><span>{n.text} {n.details && <button class="linkbtn" style={{ minHeight: 0, fontSize: '13px', display: 'inline' }} onClick={() => setDetails(!details)}>{details ? 'Hide details' : 'Show all checks'}</button>}</span></div>
+                  <div key={n.text} class="check"><span class="mark" style={{ color: n.mark === '✓' ? 'var(--text)' : n.warn ? 'var(--warn)' : 'var(--accent)' }}>{n.mark}</span><span>{n.text} {n.details && <button class="linkbtn" style={{ minHeight: 0, fontSize: '13px', display: 'inline' }} onClick={() => setDetails(!details)}>{details ? 'Hide details' : 'Show all checks'}</button>}</span></div>
                 ))}</Card>
               </Section>
               {details && (
@@ -318,12 +341,21 @@ export function Review() {
       </div>
       {!a.clean && <span class="note">{a.canSign ? 'Tick each item above to make Sign active.' : 'Once blockers are gone, the items above are confirmed one by one before Sign becomes active.'}</span>}
       {err && <span class="note err">{err}</span>}
+      {inspector ? (
+        <div class="btnrow">
+          <button class="btn-secondary bold" onClick={reject}>Reject</button>
+          {canSign ? <button class="btn-primary" onClick={() => go('sign-inputs')}>Sign inputs</button> : <button class="btn-primary" disabled>{a.canSign ? 'Confirm the items first' : 'Blocked'}</button>}
+        </div>
+      ) : (<>
       <div class="btnrow">
-        <button class="btn-secondary bold" onClick={() => { setState({ tx: { source: tx.source } }); go('main'); }}>Reject</button>
+        <button class="btn-secondary bold" onClick={reject}>Reject</button>
         {canSign && <button class="btn-secondary bold" title="The host adds its own randomness to each nonce, so this signer can’t leak your key through the signatures"
           onClick={() => { setErr(''); try { startTxAntiExfil(); } catch (e) { setErr('Anti-exfil signing isn’t possible: ' + e.message); } }}>Anti-exfil signing</button>}
         {canSign ? <button class="btn-primary" onClick={sign}>{a.clean ? 'Approve & sign' : 'Sign'}</button> : <button class="btn-primary" disabled>{a.canSign ? 'Confirm the items first' : 'Blocked'}</button>}
       </div>
+      {canSign && <button class="linkbtn" style={{ alignSelf: 'center' }} onClick={() => go('sign-inputs')}><span class="muted">Keys on another device?</span>&nbsp;Sign inputs one by one</button>}
+      </>)}
+      {help && <ReviewHelp onClose={() => setHelp(false)} />}
     </NavShell>
   );
 }
@@ -338,13 +370,13 @@ export function SignedExport() {
   const fmt = tx.qrFormat || defFmt;
   const b64 = s ? base64.encode(s.psbt) : '';
   const qr = useMemo(() => (s ? psbtQRFrames(s.psbt, fmt) : null), [fmt, b64]);
-  if (!s) { go('main'); return null; }
+  if (!s) { go(app().home); return null; }
   const spec = { title: 'Signed PSBT', value: b64, file: 'signed.psbt', fileData: s.psbt, fileType: 'application/octet-stream', qr: { frames: qr.frames, next: qr.next },
     extra: <span class="note">QR format: {fmt}{qr.animated ? ' · animated' : ''}. Change it on the screen below the field.</span> };
   const rows = [['UR · animated', 'Sparrow, BlueWallet, Nunchuk, Keystone, Jade'], ['BBQr · animated', 'Sparrow, Nunchuk, Coldcard Q, Krux'], ['Base43 · one QR', 'Electrum'], ['Base64 · one QR', 'Sparrow, Specter, Caravan'], ['.psbt / .txn file', 'Sparrow, Electrum, Nunchuk, Bitcoin Core']];
   return (
     <NavShell max={1040} gap={18}>
-      <TitleRow back="main" title="Signed" />
+      <TitleRow back={app().home} title="Signed" />
       <div class="okbanner"><I.ICheck size={20} /><span>{s.final ? 'Signed and complete. Move it to your online wallet to broadcast.' : 'Signature added. Move it to your online wallet; other signers still have to sign.'}</span></div>
       <div class="cols2">
         <div>
@@ -369,7 +401,7 @@ export function SignedExport() {
       </div>
       <div class="btnrow">
         <button class="btn-secondary bold" onClick={() => { patch('tx', { detailsFrom: 'signed-export' }); go('psbt-details'); }}>View PSBT details &amp; JSON</button>
-        <button class="btn-primary" onClick={() => { setState({ tx: { source: tx.source } }); go('main'); }}>Done</button>
+        <button class="btn-primary" onClick={() => { setState({ tx: { source: tx.source } }); go(app().home); }}>Done</button>
       </div>
     </NavShell>
   );
@@ -380,11 +412,11 @@ export function PsbtDetails() {
   const tx = st.tx;
   const [tab, setTab] = useState('sum');
   const a = tx.analysis;
-  if (!a) { go('signed'); return null; }
+  if (!a) { go(has('wallet') ? 'signed' : app().home); return null; }
   const unit = st.settings.unit;
   const json = tx.json || (tx.txObj ? psbtJSON(tx.txObj, a) : '{}');
   const txid = (tx.signed && tx.signed.txid) || a.txid;
-  const back = tx.detailsFrom || 'signed';
+  const back = tx.detailsFrom || (has('wallet') ? 'signed' : 'review');
   const Row = ({ k, v, ex, mono }) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', borderTop: '1px solid var(--line)' }}>
       <span style={{ display: 'flex', flexDirection: ex || mono ? 'column' : 'row', justifyContent: 'space-between', gap: '2px 10px', flex: '1 1 auto', minWidth: 0, fontSize: '14px' }}><span class="muted">{k}</span><span class={mono ? 'mono' : ''} style={{ fontSize: mono ? '12px' : '14px', wordBreak: 'break-all' }}>{v}</span></span>
@@ -411,7 +443,7 @@ export function PsbtDetails() {
                 {x.pubkey && <Row k="Public key" v={x.pubkey} mono ex={{ title: 'Input ' + x.n + ' · public key', value: x.pubkey, file: 'input-' + x.n + '-pubkey.txt' }} />}
                 <Row k="Type" v={x.scriptName} />
                 <Row k="Sighash" v={x.sighashName} />
-                <Row k="Belongs to" v={x.own ? 'This wallet' : 'Not this wallet'} />
+                <Row k="Belongs to" v={x.own ? 'This wallet' + (x.own.unverified ? ' · not checked' : '') : 'Not this wallet'} />
               </Card></Section>
             ))}
           </div>
@@ -421,7 +453,7 @@ export function PsbtDetails() {
                 {o.kind === 'data' ? <Row k="OP_RETURN data" v={o.data.hex} mono ex={{ title: 'Output ' + o.n + ' · data', value: o.data.hex, file: 'output-' + o.n + '-data.txt' }} />
                   : <Row k="Address" v={o.address || o.script} mono ex={{ title: 'Output ' + o.n + ' · address', value: o.address || o.script, file: 'output-' + o.n + '-address.txt' }} />}
                 <Row k="Type" v={o.scriptName} />
-                <Row k="Belongs to" v={{ external: 'Not this wallet', change: 'This wallet · change', mine: 'This wallet · receive', unusual: 'This wallet · unusual path', data: 'Nobody (data)' }[o.kind]} />
+                <Row k="Belongs to" v={{ external: 'Not this wallet', change: 'This wallet · change', mine: 'This wallet · receive', unusual: 'This wallet · unusual path', data: 'Nobody (data)' }[o.kind] + (o.unverified ? ' · not checked' : '')} />
                 {o.own && o.own.path && <Row k="Path" v={o.own.path} mono />}
               </Card></Section>
             ))}
@@ -440,3 +472,161 @@ export function PsbtDetails() {
     </NavShell>
   );
 }
+
+// ---------- PSBT Inspector ----------
+
+export function InspectorHome() {
+  const steps = [
+    ['Load and review', 'Bring in the PSBT from your online wallet and check every amount, output and warning.'],
+    ['Sign inputs', 'Each input shows a hash. Scan it with the Addresses app on the device that holds the keys, then scan the signature back.'],
+    ['Export', 'Once every signature checks out, the signed PSBT and final transaction are ready to broadcast.'],
+  ];
+  return (
+    <NavShell max={760} gap={18}>
+      <h1>PSBT Inspector</h1>
+      <p class="lead">Review a transaction before it is signed. The Inspector holds no private keys: it checks the PSBT, shows each input’s hash to sign, and checks every signature before putting it into the PSBT.</p>
+      <div class="warnline" role="note"><I.IWarn /><span>Run this offline. On an online computer, malware can show one transaction and request signatures for another.</span></div>
+      <ol class="steplist">{steps.map(([t, d], i) => <li key={t}><span class="num">{i + 1}</span><span><b>{t}</b><small>{d}</small></span></li>)}</ol>
+      <button class="btn-primary" onClick={() => go('load')}>Load transaction</button>
+    </NavShell>
+  );
+}
+
+function ReviewHelp({ onClose }) {
+  return (
+    <HelpDialog id="rv-help-title" title="About the review" onClose={onClose}>
+      <HelpSec t="What the review checks">
+        <li><b>Ownership:</b> every input you sign belongs to your wallet. The Full app proves it with the open wallet; the Inspector needs a watch-only key, or marks ownership “not checked”.</li>
+        <li><b>Amounts:</b> input amounts come from the full previous transactions, so the fee shown is the real fee.</li>
+        <li><b>Change:</b> an output counts as change only if it goes back to your wallet at a path the wallet derives itself.</li>
+        <li><b>Blockers:</b> signing stops on things that can lose funds: a sighash other than ALL, duplicate inputs, a previous transaction that doesn’t match, or the wrong network.</li>
+        <li><b>Confirm items:</b> things to double-check before signing, such as a high fee, a far-off locktime, a payment to your own address or change at an unusual path.</li>
+      </HelpSec>
+      <HelpSec t="Why run it offline">
+        <li>On an online computer, malware can show one transaction and request signatures for another.</li>
+        <li>When the Inspector and Addresses are separate apps, the signer only sees hashes: this review is the only place the transaction itself is checked.</li>
+      </HelpSec>
+    </HelpDialog>
+  );
+}
+
+/** A signature as typed or scanned: hex, Base64, or raw bytes from a file. */
+function sigBytes(v) {
+  if (v instanceof Uint8Array) return v;
+  const t = String(v || '').replace(/\s+/g, '');
+  if (!t) return null;
+  if (isHex(t)) return hex.decode(t);
+  try { return base64.decode(t); } catch (e) { return null; }
+}
+const placeOf = (it) => (it.label ? it.label : it.branch === 0 || it.branch === 1 ? (it.branch ? 'Change' : 'Receive') + ' #' + it.index + ' · ' + it.path : it.path);
+
+/**
+ * Sign inputs: for keys on another device. Each input of the wallet shows its hash to sign; the
+ * signature made elsewhere (Addresses → Sign or verify → Raw hash) is checked against the input's
+ * key before it goes in. Export works as soon as one input is signed.
+ */
+export function SignInputs() {
+  const st = useStore();
+  const { tx, settings } = st;
+  const a = tx.analysis;
+  const prep = useMemo(() => {
+    if (!a || !tx.txObj) return null;
+    try { return { ok: prepareSignInputs(tx.txObj, a) }; } catch (e) { return { err: e.message }; }
+  }, [a]);
+  if (!a || !prep) {
+    return (
+      <NavShell max={760} gap={18}>
+        <TitleRow back={has('inspector') ? 'inspector' : 'source'} title="Sign inputs" />
+        <div class="infoline"><I.IInfo /><span>Load and review a transaction first. Its inputs show here, each with the hash to sign.</span></div>
+        <button class="btn-primary" onClick={() => go('load')}>Load transaction</button>
+      </NavShell>
+    );
+  }
+  const acks = tx.acks || {};
+  const ready = a.canSign && a.confirm.every((c) => acks[c.id]);
+  if (!ready || prep.err) {
+    return (
+      <NavShell max={760} gap={18}>
+        <TitleRow back="review" title="Sign inputs" />
+        <div class="infoline"><I.IWarn /><span>{prep.err || (a.canSign ? 'Confirm each item on the review first.' : 'This transaction has blockers or missing data. The review explains them.')}</span></div>
+        <button class="btn-primary" onClick={() => go('review')}>Back to the review</button>
+      </NavShell>
+    );
+  }
+  const { items } = prep.ok;
+  const texts = tx.sigs || items.map(() => '');
+  const setSig = (i, v) => { const n = texts.slice(); n[i] = v; patch('tx', { sigs: n }); };
+  const checks = items.map((it, i) => {
+    if (it.pre) return { state: 'pre' };
+    const t = texts[i];
+    if (!(t instanceof Uint8Array) && !String(t || '').trim()) return { state: 'wait' };
+    const b = sigBytes(t);
+    if (!b) return { state: 'bad', why: 'Not hex or Base64.' };
+    const c = checkInputSignature(it, b);
+    return c.ok ? { state: 'ok', field: c.field, added: c.added } : { state: 'bad', why: c.why };
+  });
+  const done = checks.filter((c) => c.state === 'ok' || c.state === 'pre').length;
+  const all = done === items.length;
+  const result = () => applyInputSignatures(prep.ok, checks.map((c) => (c.state === 'ok' ? c.field : null)));
+  const finish = () => {
+    const res = result();
+    if (has('wallet')) {
+      const json = psbtJSON(tx.txObj, a);
+      addLog({ kind: 'psbt', txid: res.txid, main: shortAddr(res.txid, 4, 5), ours: [], snapshot: { analysis: a, json, signed: res, format: tx.format, source: tx.source } });
+    }
+    patch('tx', { signed: res, json: psbtJSON(tx.txObj, a) });
+    go('signed-export');
+  };
+  const exportPartial = () => {
+    const res = result();
+    const fmt = ['UR', 'BBQr', 'Base43', 'Base64'].includes(tx.format) ? tx.format : 'UR';
+    const qr = psbtQRFrames(res.psbt, fmt);
+    openExport({ title: 'Partially signed PSBT', value: base64.encode(res.psbt), file: 'partially-signed.psbt', fileData: res.psbt, fileType: 'application/octet-stream', qr: { frames: qr.frames, next: qr.next },
+      extra: <span class="note">{res.signedCount} of {res.total} inputs signed · QR format {fmt}{qr.animated ? ' · animated' : ''}</span> });
+  };
+  return (
+    <NavShell max={860} gap={16}>
+      <TitleRow back="review" title="Sign inputs" />
+      <div class="stack" style={{ gap: '6px' }}>
+        <div class="spread"><b>{done} of {items.length} input{items.length > 1 ? 's' : ''} signed</b><span class="note">Inputs of this wallet</span></div>
+        <div class="progressbar"><i style={{ width: Math.round((100 * done) / items.length) + '%' }} /></div>
+      </div>
+      {items.map((it, i) => {
+        const c = checks[i];
+        const tag = c.state === 'pre' || c.state === 'ok' ? ['Signed', 'var(--accent)'] : c.state === 'wait' ? ['Waiting', 'var(--dim)'] : ['Not valid', 'var(--danger)'];
+        const hashHex = hex.encode(it.hash);
+        return (
+          <section key={it.n} class="sicard">
+            <div class="spread"><span><b>Input #{it.n}</b>{it.amount !== null && <span class="muted"> · {fmtAmt(it.amount, settings.unit)}</span>}</span><span class="sitag" style={{ color: tag[1], borderColor: tag[1] }}>{tag[0]}</span></div>
+            <div class="stack" style={{ gap: '2px' }}>
+              <span class="mono" style={{ fontSize: '13px', wordBreak: 'break-all' }}>{it.address}</span>
+              <span class="note">{placeOf(it)}{it.unverified ? ' · not checked' : ''}</span>
+              <span class="note">{it.alg === 'schnorr' ? 'Schnorr · tweaked key' : 'ECDSA'} · SIGHASH_{it.sighash === 0 ? 'DEFAULT' : it.sighash === 1 ? 'ALL' : '0x' + it.sighash.toString(16)}</span>
+            </div>
+            {c.state === 'pre' ? <span class="note ok">✓ Already signed</span> : (
+              <>
+                <div class="cols2 tight">
+                  <OutField label="Hash to sign · 32 bytes" value={hashHex} spec={{ title: 'Hash to sign · input #' + it.n, value: hashHex, file: 'input-' + it.n + '-hash.txt' }} />
+                  <InField id={'sig-' + it.n} label="Signature" textarea rows={2} value={texts[i] instanceof Uint8Array ? hex.encode(texts[i]) : texts[i] || ''} onInput={(v) => setSig(i, v)}
+                    placeholder={it.alg === 'schnorr' ? '64 bytes · hex or Base64' : 'DER hex or Base64'} bad={c.state === 'bad'}
+                    note={c.state === 'wait' ? (it.alg === 'schnorr' ? 'Schnorr signature, 64 bytes. Hex or Base64.' : 'DER, with or without the sighash byte. Hex or Base64.') : c.state === 'ok' ? '✓ Valid for this input' + (c.added ? ' · sighash byte 0' + it.sighash.toString(16) + ' added' : '') : '✗ ' + c.why}
+                    noteCls={c.state === 'ok' ? 'ok' : c.state === 'bad' ? 'err' : ''}
+                    spec={{ title: 'Signature · input #' + it.n, binary: true, onValue: (v) => setSig(i, v instanceof Uint8Array ? (isPrintable(v) ? new TextDecoder().decode(v).trim() : hex.encode(v)) : String(v).trim()) }} />
+                </div>
+                <span class="note">In Addresses: open this address → Sign or verify → Raw hash → scan the hash.</span>
+              </>
+            )}
+          </section>
+        );
+      })}
+      {all ? <button class="btn-primary" onClick={finish}>Finish</button>
+        : done > 0 ? (
+          <div class="stack">
+            <button class="btn-secondary bold" onClick={exportPartial}>Export partially signed PSBT</button>
+            <span class="note">Not ready to broadcast: other inputs still need signatures. Any signer can continue from this file.</span>
+          </div>
+        ) : <button class="btn-primary" disabled>Sign an input to export</button>}
+    </NavShell>
+  );
+}
+const isPrintable = (b) => b.every((x) => x === 10 || x === 13 || (x >= 32 && x < 127));

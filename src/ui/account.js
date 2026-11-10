@@ -21,7 +21,7 @@ export function resolveSel(w, sel, net) {
   if (sel.keyIdx !== undefined) {
     const k = w.keys[sel.keyIdx];
     const pub = pubOf(k.priv, k.compressed);
-    return { priv: k.priv, pub, compressed: k.compressed, address: payment(k.type, pub, net).address, type: k.type, path: null, key: k };
+    return { priv: k.priv, pub, compressed: k.compressed, address: payment(sel.type || k.type, pub, net).address, type: sel.type || k.type, path: null, key: k };
   }
   const node = w.root ? w.root.derive(sel.base).deriveChild(sel.branch).deriveChild(sel.i) : w.node.deriveChild(sel.branch).deriveChild(sel.i);
   return { node, priv: node.privateKey, pub: node.publicKey, compressed: true, address: payment(sel.type, node.publicKey, net).address, type: sel.type, path: sel.base + '/' + sel.branch + '/' + sel.i };

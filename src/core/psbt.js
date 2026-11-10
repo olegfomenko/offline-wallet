@@ -2,16 +2,22 @@
 // re-deriving the key, amounts against the full previous transaction, change by re-deriving the
 // output script from its path. Anything that can't be proven is reported, not assumed.
 //
+// It runs in three modes, by what `w` is:
+//   a wallet          (Full app)    ownership proven by re-deriving the private key;
+//   { kind: 'watch' } (Inspector)   proven by re-deriving the public key from an xpub or descriptor;
+//   null              (Inspector)   no keys at all: the PSBT's own key paths are used, but marked
+//                                   unverified, and the review says ownership and change weren't checked.
+//
 // The analysis holds no private keys: an owned input or output records its path and fingerprint
 // (or the index of a single key), and signing re-derives the key from the wallet. So an analysis
 // kept in the Signed log can't keep key material alive after the wallet is closed.
 import * as btc from '@scure/btc-signer';
 import { hex, equal, utf8, sha256d, concat, varint, wipe, MONTHS } from './util.js';
-import { HARDENED_OFFSET, payment, scriptToAddress, scriptKind, formatPath, fpHex, NETS, xonly } from './hd.js';
+import { HARDENED_OFFSET, payment, scriptToAddress, scriptKind, formatPath, fpHex, NETS, xonly, parseExt, parseDescriptor, parsePath } from './hd.js';
 import { pubOf } from './keys.js';
 import { getPrevOut } from '@scure/btc-signer/transaction.js';
-import { taprootTweakPrivKey } from '@scure/btc-signer/utils.js';
-import { schnorr } from '@noble/curves/secp256k1.js';
+import { taprootTweakPrivKey, taprootTweakPubkey } from '@scure/btc-signer/utils.js';
+import { secp256k1, schnorr } from '@noble/curves/secp256k1.js';
 import { ecdsaSignerNonce, ecdsaSignAntiExfil, schnorrSignerNonce, schnorrSignAntiExfil } from './antiexfil.js';
 
 const TX_OPTS = {
@@ -44,6 +50,7 @@ function nodeFor(w, fingerprint, path) {
   }
   if (w.node) {
     if (path.length < 2) return null;
+    if (w.kind === 'watch' && w.fpNum !== null && (fingerprint >>> 0) !== w.fpNum) return null;
     const tail = path.slice(-2);
     if (tail.some((i) => i >= HARDENED_OFFSET)) return null;
     return w.node.deriveChild(tail[0]).deriveChild(tail[1]);
@@ -58,6 +65,7 @@ function nodeFor(w, fingerprint, path) {
  */
 function matchOwn(w, script, derivs, tapDerivs, net) {
   const st = typeOfScript(script);
+  if (!w) return matchClaimed(script, derivs, tapDerivs, net);
   if (w.kind === 'keys') {
     for (let i = 0; i < w.keys.length; i++) {
       const k = w.keys[i];
@@ -75,7 +83,7 @@ function matchOwn(w, script, derivs, tapDerivs, net) {
   for (const r of rows) {
     let node;
     try { node = nodeFor(w, r.fp, r.path); } catch (e) { node = null; }
-    if (!node || !node.privateKey) continue;
+    if (!node || (!node.privateKey && w.kind !== 'watch')) continue;
     const pub = node.publicKey;
     if (r.tap ? !equal(pub.subarray(1), r.pub) : !equal(pub, r.pub)) continue;
     const types = r.tap ? ['tr'] : st === 'sh' ? ['shwpkh'] : st === 'pkh' ? ['pkh'] : ['wpkh'];
@@ -91,6 +99,48 @@ function matchOwn(w, script, derivs, tapDerivs, net) {
     mismatch = mismatch || { mismatch: true, path: formatPath(r.path) };
   }
   return mismatch;
+}
+
+/**
+ * No keys at all (Inspector without a watch-only key): take the PSBT's own key paths, as long as the
+ * key they name really makes the coin's script. That proves the PSBT is consistent, not that the
+ * key is yours, so the record is marked `unverified`.
+ */
+function matchClaimed(script, derivs, tapDerivs, net) {
+  const st = typeOfScript(script);
+  const rows = [];
+  for (const [pub, d] of derivs || []) rows.push({ pub, fp: d.fingerprint, path: d.path, tap: false });
+  for (const [pub, d] of tapDerivs || []) if (!d.hashes || d.hashes.length === 0) rows.push({ pub, fp: d.der.fingerprint, path: d.der.path, tap: true });
+  for (const r of rows) {
+    if (r.path.length > MAX_PATH) continue;
+    const types = r.tap ? ['tr'] : st === 'sh' ? ['shwpkh'] : st === 'pkh' ? ['pkh'] : ['wpkh'];
+    for (const t of types) {
+      let ok = false;
+      try { ok = equal(payment(t, r.pub, net).script, script); } catch (e) { ok = false; }
+      if (!ok) continue;
+      const p = r.path;
+      return {
+        pub: r.pub, type: t, path: formatPath(p), fp: fpHex(r.fp).toUpperCase(), pathArr: p.slice(), fpNum: r.fp >>> 0, compressed: true, unverified: true,
+        branch: p.length >= 2 ? p[p.length - 2] : null, index: p.length >= 1 ? p[p.length - 1] : null,
+      };
+    }
+  }
+  return null;
+}
+
+/** The network a PSBT is for, from the coin type of its standard key paths (1′ = test networks). */
+export function inferNet(tx) {
+  const paths = [];
+  const take = (x) => {
+    for (const [, d] of x.bip32Derivation || []) paths.push(d.path);
+    for (const [, d] of x.tapBip32Derivation || []) paths.push(d.der.path);
+  };
+  for (let i = 0; i < tx.inputsLength; i++) take(tx.getInput(i));
+  for (let j = 0; j < tx.outputsLength; j++) take(tx.getOutput(j));
+  for (const p of paths) {
+    if (p.length >= 2 && p[0] >= HARDENED_OFFSET && STD_PURPOSE[p[0] - HARDENED_OFFSET]) return p[1] === HARDENED_OFFSET + 1 ? 'test' : 'main';
+  }
+  return 'main';
 }
 
 const prefixKey = (own) => own.fpNum + '|' + own.pathArr.slice(0, -2).join('/');
@@ -171,6 +221,8 @@ export function locktimeInfo(lt) {
  *   blockers (can't sign), missing (data needed), confirm (must tick), info (good to know), notes (before you sign).
  */
 export function analyzePsbt(tx, w, { net = 'main', feeLimitPct = 5 } = {}) {
+  const mode = !w ? 'none' : w.kind === 'watch' ? 'watch' : 'wallet';
+  const who = mode === 'watch' ? 'the watch-only wallet' : 'this wallet';
   const version = tx.version;
   const inputs = [];
   const blockers = [], missing = [], confirm = [], info = [], notes = [];
@@ -229,7 +281,11 @@ export function analyzePsbt(tx, w, { net = 'main', feeLimitPct = 5 } = {}) {
       blockers.push({ title: 'Input ' + n + ' asks for SIGHASH_' + rec.sighashName, body: 'That signature would let others change the transaction after you sign' + (sighash & 0x80 ? ', adding or removing inputs' : '') + (sighash & 3 && (sighash & 3) !== 1 ? ' and where the money goes' : '') + '. Ask your online wallet for a normal transaction and scan it again. Special signing types are an expert option, off by default.' });
     }
     if (rel) info.push({ title: 'Input ' + n + ' has a relative timelock', body: rel.kind === 'blocks' ? rel.blocks + ' blocks (about ' + humanBlocks(rel.blocks) + ') after its coin was confirmed.' : humanSecs(rel.seconds) + ' after its coin was confirmed.' });
-    if (!rec.own && prevScript && !finalized) info.push({ title: 'Input ' + n + ' isn’t from this wallet', body: 'This device won’t sign it. Someone else has to, before the transaction can be sent.' });
+    if (!rec.own && prevScript && !finalized) {
+      info.push(mode === 'none'
+        ? { title: 'Input ' + n + ' doesn’t name a key', body: 'The PSBT has no key path for it, so it can’t be signed here. Someone else has to sign it before the transaction can be sent.' }
+        : { title: 'Input ' + n + ' isn’t from ' + who, body: 'It can’t be signed here. Someone else has to, before the transaction can be sent.' });
+    }
   }
   const seenOutpoints = new Set();
   for (const x of inputs) {
@@ -246,12 +302,23 @@ export function analyzePsbt(tx, w, { net = 'main', feeLimitPct = 5 } = {}) {
   }
   if (!ownInputs.length) {
     const fps = wantedFingerprints(tx);
-    blockers.push({
-      title: 'No input belongs to this wallet',
-      body: fps.length && w.fp && !fps.includes(w.fp)
-        ? 'The transaction expects key fingerprint ' + fps.join(', ') + ', but this wallet is ' + w.fp + '. Check the seed, the passphrase, and which wallet made it.'
-        : 'Nothing here can be signed with this wallet. Check the seed, the passphrase, the address type and which wallet made it.',
-    });
+    if (mode === 'none') {
+      blockers.push({ title: 'No input names its key', body: 'The PSBT has no key paths (BIP32 derivations) for its inputs, so there is nothing to sign here. Export it again from your online wallet with key paths included.' });
+    } else if (mode === 'watch') {
+      blockers.push({
+        title: 'No input belongs to the watch-only wallet',
+        body: fps.length && w.fp && !fps.includes(w.fp)
+          ? 'The transaction expects key fingerprint ' + fps.join(', ') + ', but the watch-only key is ' + w.fp + '. Check that it is the account key of the wallet that made the transaction.'
+          : 'None of the inputs comes from this watch-only key. Check that it is the account key (and address type) of the wallet that made the transaction.',
+      });
+    } else {
+      blockers.push({
+        title: 'No input belongs to this wallet',
+        body: fps.length && w.fp && !fps.includes(w.fp)
+          ? 'The transaction expects key fingerprint ' + fps.join(', ') + ', but this wallet is ' + w.fp + '. Check the seed, the passphrase, and which wallet made it.'
+          : 'Nothing here can be signed with this wallet. Check the seed, the passphrase, the address type and which wallet made it.',
+      });
+    }
   }
 
   // outputs
@@ -274,12 +341,13 @@ export function analyzePsbt(tx, w, { net = 'main', feeLimitPct = 5 } = {}) {
       } else if (own) {
         rec.own = own;
         const acct = own.pathArr ? inputAccounts.get(prefixKey(own)) : null;
-        if (w.kind === 'keys') rec.kind = 'change';
+        if (w && w.kind === 'keys') rec.kind = 'change';
         else if (acct && acct.has(own.type) && (own.branch === 0 || own.branch === 1) && !coinMismatch(own, net)) rec.kind = own.branch === 1 ? 'change' : 'mine';
         else {
           rec.kind = 'unusual';
           confirm.push({ id: 'path' + n, title: 'Output ' + n + ' goes to this wallet at an unusual path', body: 'Path ' + own.path + ' (' + TYPE_NAMES[own.type] + ') is not a receive or change address of the account your inputs come from' + (coinMismatch(own, net) ? ', and its coin type doesn’t match ' + NETS[net].name : '') + '. The coins stay yours, but your online wallet probably won’t show them. Sign only if you expect this.' });
         }
+        if (own.unverified) rec.unverified = true;
         if (rec.kind === 'mine') confirm.push({ id: 'self' + n, title: 'Output ' + n + ' pays your own receive address #' + own.index, body: 'In this wallet but not change. Fine if you meant to.' });
         if (own.index !== null && own.index > UNUSUAL_INDEX) confirm.push({ id: 'idx' + n, title: (rec.kind === 'change' ? 'Change' : 'Output ' + n) + ' at index ' + own.index.toLocaleString('en-US'), body: 'Verified from its path. Your online wallet may not show it until its gap limit reaches that far.' });
       }
@@ -309,21 +377,28 @@ export function analyzePsbt(tx, w, { net = 'main', feeLimitPct = 5 } = {}) {
 
   const changeOk = outputs.filter((o) => o.kind === 'change').length;
   const checks = [];
-  if (ownInputs.length === inputs.length) checks.push({ ok: inKnown && inputs.every((x) => x.amountProven), text: (inputs.length > 1 ? 'All ' + inputs.length + ' inputs belong' : 'The input belongs') + ' to this wallet' + (inputs.every((x) => x.amountProven) ? ', amounts confirmed' + (inputs.some((x) => x.scriptType !== 'tr') ? ' from the full previous transactions.' : ' by Taproot signing.') : '.') });
-  else checks.push({ ok: false, text: ownInputs.length + ' of ' + inputs.length + ' inputs belong to this wallet.' });
-  if (changeOk) checks.push({ ok: true, text: 'Change goes back to this wallet at a path it derives itself.' });
-  else checks.push({ ok: true, text: 'No change output: everything goes to the outputs shown.' });
+  const amountsText = inputs.every((x) => x.amountProven) ? 'mounts confirmed' + (inputs.some((x) => x.scriptType !== 'tr') ? ' from the full previous transactions.' : ' by Taproot signing.') : null;
+  if (mode === 'none') {
+    checks.push({ ok: false, text: 'Ownership not checked: no watch-only key.' + (amountsText ? ' A' + amountsText : '') });
+    checks.push({ ok: false, text: changeOk ? 'Change not checked: no watch-only key.' : 'No change output: everything goes to the outputs shown.' });
+  } else {
+    if (ownInputs.length === inputs.length) checks.push({ ok: inKnown && inputs.every((x) => x.amountProven), text: (inputs.length > 1 ? 'All ' + inputs.length + ' inputs belong' : 'The input belongs') + ' to ' + who + (amountsText ? ', a' + amountsText : '.') });
+    else checks.push({ ok: false, text: ownInputs.length + ' of ' + inputs.length + ' inputs belong to ' + who + '.' });
+    if (changeOk) checks.push({ ok: true, text: 'Change goes back to ' + who + ' at a path it derives itself.' });
+    else checks.push({ ok: true, text: 'No change output: everything goes to the outputs shown.' });
+  }
   if (inputs.every((x) => !x.own || x.sighash === undefined || x.sighash <= 1)) checks.push({ ok: true, text: 'Every input signs with SIGHASH_ALL.' });
   if (lt.kind === 'block') checks.push({ ok: false, text: 'Locktime is block ' + lt.value.toLocaleString('en-US') + '. This device is offline and doesn’t know the current block, so check in your online wallet that it is not far in the future.' });
   if (unknownGlobal) checks.push({ ok: false, text: unknownGlobal + ' unknown PSBT field' + (unknownGlobal > 1 ? 's' : '') + '. Kept unchanged, shown in JSON.' });
 
   const summaryOk = blockers.length + missing.length + confirm.length === 0;
-  if (summaryOk) notes.push({ mark: '✓', text: (changeOk ? 'Change verified from its path, i' : 'I') + 'nputs and amounts checked, normal signing.', details: true });
+  if (summaryOk && mode === 'none') notes.push({ mark: '!', warn: true, text: 'Ownership and change not checked. Add a watch-only key on Load transaction to prove them.', details: true });
+  else if (summaryOk) notes.push({ mark: '✓', text: (changeOk ? 'Change verified from its path, i' : 'I') + 'nputs and amounts checked, normal signing.', details: true });
 
   return {
     txid: tx.id, version, lockTime: tx.lockTime, lt, rbf, psbtVersion: tx.global.version || 0, net,
     inputs, outputs, inSum: inKnown ? inSum : null, outSum, fee, vsize, feeRate, feePct, sentExt, toSelf,
-    blockers, missing, confirm, info, notes, checks, clean: summaryOk, unknownCount: unknownGlobal,
+    blockers, missing, confirm, info, notes, checks, clean: summaryOk, unknownCount: unknownGlobal, mode,
     canSign: blockers.length === 0 && missing.length === 0,
   };
 }
@@ -481,6 +556,135 @@ export function signPsbtAntiExfil(prep, commitments, datas) {
   for (const { it, upd } of sigs) t.updateInput(it.idx, upd, true);
   const res = finishSigned(t, analysis, sigs.length);
   return { ...res, nonces: sigs.map(({ it, r }) => ({ n: it.n, R: r.R, Rfinal: r.Rfinal })) };
+}
+
+// ---- Sign inputs: each input's hash goes out, a signature made elsewhere comes back ----
+// For keys on another device (the Addresses app's Raw hash signing). Nothing here touches a
+// private key: the hash is computed from the PSBT, the signature is checked against the input's
+// public key (the tweaked output key for Taproot) before it goes into the PSBT.
+
+/**
+ * One item per input to sign: { n, idx, type, alg, address, amount, path, branch, index, hash,
+ * sighash, key, pre, unverified }. `pre` = the PSBT already carries a valid signature for it.
+ */
+export function prepareSignInputs(tx, analysis) {
+  if (!analysis.canSign) throw new Error('This transaction has blockers or missing data.');
+  const t = btc.Transaction.fromPSBT(tx.toPSBT(), TX_OPTS);
+  const items = [];
+  for (const inp of analysis.inputs) {
+    if (!inp.own || inp.finalized) continue;
+    const idx = inp.n - 1;
+    const type = inp.own.type;
+    const cur = t.getInput(idx);
+    if (type === 'shwpkh' && !cur.redeemScript) t.updateInput(idx, { redeemScript: payment('shwpkh', inp.own.pub, analysis.net).redeemScript });
+    if (type === 'tr') {
+      if (cur.tapMerkleRoot) throw new Error('Input ' + inp.n + ': Taproot script trees aren’t supported.');
+      if (!cur.tapInternalKey) t.updateInput(idx, { tapInternalKey: xonly(inp.own.pub) });
+    }
+    const { hash, sighash } = sighashOf(t, idx, type);
+    const key = type === 'tr' ? taprootTweakPubkey(xonly(inp.own.pub), new Uint8Array(0))[0] : inp.own.pub;
+    const item = {
+      n: inp.n, idx, type, alg: type === 'tr' ? 'schnorr' : 'ecdsa', address: inp.address, amount: inp.amount,
+      path: inp.own.path, branch: inp.own.branch, index: inp.own.index, label: inp.own.label || null,
+      hash, sighash, key, pre: false, unverified: !!inp.own.unverified,
+    };
+    const now = t.getInput(idx);
+    if (type === 'tr') item.pre = !!now.tapKeySig && checkInputSignature(item, now.tapKeySig).ok;
+    else {
+      const ps = (now.partialSig || []).find(([pk]) => equal(pk, key));
+      item.pre = !!ps && checkInputSignature(item, ps[1]).ok;
+    }
+    items.push(item);
+  }
+  if (!items.length) throw new Error('No input of this wallet left to sign.');
+  return { t, items, analysis };
+}
+
+/**
+ * Check a signature for one item. ECDSA: DER, with or without the sighash byte (it must be this
+ * input's); Schnorr: 64 bytes, or 65 with the sighash byte. Returns { ok: true, field, added } with
+ * the bytes to put in the PSBT, or { ok: false, kind: 'format' | 'byte' | 'bad', why }.
+ */
+export function checkInputSignature(item, sig) {
+  if (!(sig instanceof Uint8Array) || !sig.length) return { ok: false, kind: 'format', why: 'Empty.' };
+  if (item.alg === 'schnorr') {
+    if (sig.length !== 64 && sig.length !== 65) return { ok: false, kind: 'format', why: 'Not a Schnorr signature: it is 64 bytes, or 65 with the sighash byte.' };
+    if (sig.length === 65 && sig[64] !== item.sighash) return { ok: false, kind: 'byte', why: 'Its sighash byte is 0x' + sig[64].toString(16).padStart(2, '0') + '; this input signs with SIGHASH_' + (SIGHASH_NAMES[item.sighash] || item.sighash) + '.' };
+    if (sig.length === 64 && item.sighash !== btc.SigHash.DEFAULT) return { ok: false, kind: 'byte', why: 'This input signs with SIGHASH_' + SIGHASH_NAMES[item.sighash] + ': the signature needs its sighash byte (65 bytes).' };
+    let ok = false;
+    try { ok = schnorr.verify(sig.subarray(0, 64), item.hash, item.key); } catch (e) { ok = false; }
+    return ok ? { ok: true, field: sig.slice(), added: false } : { ok: false, kind: 'bad', why: 'Doesn’t match this input’s key and hash.' };
+  }
+  // ECDSA: strict DER; a trailing byte is the sighash type.
+  let d = null, hasByte = false;
+  try { d = secp256k1.Signature.fromBytes(sig, 'der'); } catch (e) {
+    try { d = secp256k1.Signature.fromBytes(sig.subarray(0, sig.length - 1), 'der'); hasByte = true; } catch (e2) { d = null; }
+  }
+  if (!d) return { ok: false, kind: 'format', why: 'Not a DER signature.' };
+  if (hasByte && sig[sig.length - 1] !== item.sighash) return { ok: false, kind: 'byte', why: 'Its sighash byte is 0x' + sig[sig.length - 1].toString(16).padStart(2, '0') + '; this input signs with SIGHASH_' + (SIGHASH_NAMES[item.sighash] || item.sighash) + ' (0x' + item.sighash.toString(16).padStart(2, '0') + ').' };
+  if (d.hasHighS()) return { ok: false, kind: 'bad', why: 'High-S signature: nodes won’t relay it. Sign again with the Addresses app.' };
+  let ok = false;
+  try { ok = secp256k1.verify(d.toBytes('compact'), item.hash, item.key, { prehash: false, lowS: true }); } catch (e) { ok = false; }
+  if (!ok) return { ok: false, kind: 'bad', why: 'Doesn’t match this input’s key and hash.' };
+  return { ok: true, field: concat(d.toBytes('der'), Uint8Array.of(item.sighash)), added: !hasByte };
+}
+
+/**
+ * Put the checked signatures (one `field` or null per item) into a copy of the PSBT. Partial is
+ * fine: the result says `final` only when every input of the transaction is signed.
+ * Returns { psbt, final, txHex, txid, signedCount, total }.
+ */
+export function applyInputSignatures(prep, fields) {
+  const t = btc.Transaction.fromPSBT(prep.t.toPSBT(), TX_OPTS);
+  let signed = 0;
+  prep.items.forEach((it, i) => {
+    if (it.pre) { signed++; return; }
+    const f = fields[i];
+    if (!f) return;
+    if (it.alg === 'schnorr') t.updateInput(it.idx, { tapKeySig: f }, true);
+    else t.updateInput(it.idx, { partialSig: [[it.key, f]] }, true);
+    signed++;
+  });
+  if (!signed) throw new Error('No input is signed yet.');
+  const psbt = t.toPSBT();
+  let final = false, txHex = null, txid = prep.analysis.txid;
+  try {
+    const t2 = btc.Transaction.fromPSBT(psbt, TX_OPTS);
+    t2.finalize();
+    txHex = hex.encode(t2.extract());
+    txid = t2.id;
+    final = true;
+  } catch (e) { /* other inputs still need signatures */ }
+  return { psbt, final, txHex, txid, signedCount: signed, total: prep.items.length };
+}
+
+// ---- watch-only key for the Inspector ----
+
+/**
+ * An xpub/ypub/zpub/tpub… or a public descriptor (wpkh([fp/84h/0h/0h]xpub…/<0;1>/*)) → a watch-only
+ * wallet for analyzePsbt(): { kind: 'watch', node, fp, fpNum, net, type, format }. Public keys only.
+ */
+export function watchWallet(text) {
+  const s = String(text).trim();
+  if (!s) throw new Error('Empty.');
+  let desc = null, keyStr = s;
+  if (/^(wpkh|sh|pkh|tr|combo)\(/.test(s)) { desc = parseDescriptor(s); keyStr = desc.key; }
+  if (desc && desc.type === null) throw new Error('combo() is for single keys. Use the account’s xpub or a wpkh(), sh(wpkh()), pkh() or tr() descriptor.');
+  let ext;
+  try { ext = parseExt(keyStr); } catch (e) { throw new Error('Not an xpub, zpub or descriptor.'); }
+  if (ext.priv) throw new Error('This is a private key. The Inspector only takes public keys: export the xpub or a public descriptor from your wallet.');
+  let node = ext.node;
+  if (desc && desc.deriv) {
+    const steps = parsePath('m' + desc.deriv);
+    if (steps.some((i) => i >= HARDENED_OFFSET)) throw new Error('A public key can’t derive hardened steps. Use the account key itself.');
+    for (const i of steps) node = node.deriveChild(i);
+  }
+  if (node.depth === 0) throw new Error('This is a master public key: it can’t derive the hardened account paths. Use the account xpub (depth 3) or a descriptor.');
+  const fp = desc && desc.fp ? desc.fp.toUpperCase() : null;
+  return {
+    kind: 'watch', node, fp, fpNum: fp ? parseInt(fp, 16) >>> 0 : null, net: ext.net === 'test' ? 'test' : 'main',
+    type: (desc && desc.type) || ext.type || null, format: desc ? 'Descriptor' : ext.name,
+  };
 }
 
 /** JSON view of the PSBT in the spirit of Bitcoin Core's decodepsbt. */

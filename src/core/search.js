@@ -26,9 +26,10 @@ export async function findAddress(w, addr, { net, depth = 1000, cpath = {}, onPr
   const match = matcher(target);
   if (!match) throw new Error('Only single-key addresses (1…, 3…, bc1q…, bc1p…) can be checked.');
   if (w.kind === 'keys') {
-    for (const k of w.keys) {
+    for (let i = 0; i < w.keys.length; i++) {
+      const k = w.keys[i];
       const enc = match(pubOf(k.priv, k.compressed));
-      if (enc) return { type: k.type, encoded: enc, path: null, label: k.label };
+      if (enc) return { type: k.type, encoded: enc, path: null, label: k.label, keyIdx: i };
     }
     return null;
   }

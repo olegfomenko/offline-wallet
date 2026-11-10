@@ -2,6 +2,7 @@
 import { h, Fragment } from 'preact';
 import { useState, useMemo, useRef, useEffect } from 'preact/hooks';
 import { go } from '../router.js';
+import { has } from '../app.js';
 import { getState, setState, patch, useStore } from '../store.js';
 import { FlowShell, StepRow, Seg, Switch, Spacer, OutField, ExportBtn, PrivChip, InField, I, walletLabel, useNet } from '../kit.jsx';
 import { environment } from '../env.js';
@@ -398,7 +399,7 @@ export function Passphrase() {
         </div>
         <span class="small">{waiting ? 'Enter the passphrase to see the fingerprint it gives.'
           : restore ? 'Compare it with the fingerprint you wrote down. If they differ, a word or the passphrase is wrong.'
-            : 'Write it down with your backup. Typing the passphrase again later must give the same fingerprint (Settings → Check passphrase).'}</span>
+            : 'Write it down with your backup. Typing the passphrase again later must give the same fingerprint (' + (has('settings') ? 'Settings → ' : '') + 'Check passphrase).'}</span>
         {restore && (
           <div class="fpexp">
             <label for="pp-exp" class="small">Fingerprint you wrote down (optional)</label>

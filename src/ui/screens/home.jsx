@@ -2,6 +2,7 @@
 import { h, Fragment } from 'preact';
 import { useState, useMemo, useRef, useEffect } from 'preact/hooks';
 import { go } from '../router.js';
+import { has, toolsBack } from '../app.js';
 import { setState, patch, useStore } from '../store.js';
 import { NavShell, TitleRow, Seg, OutField, ExportBtn, PrivChip, InField, I, walletLabel, fmtAmt } from '../kit.jsx';
 import { SeedGrid, seedExportSpec } from './create.jsx';
@@ -17,7 +18,10 @@ import { APP_VERSION } from '../version.js';
 export function Main() {
   const st = useStore();
   const w = st.wallet;
-  const psbts = st.log.filter((x) => x.kind === 'psbt').length, msgs = st.log.length - psbts;
+  const count = (k) => st.log.filter((x) => x.kind === k).length;
+  const psbts = count('psbt'), msgs = count('msg'), raws = count('raw');
+  const plural = (n, one) => n + ' ' + one + (n === 1 ? '' : 's');
+  const signedSummary = [has('psbt') ? plural(psbts, 'PSBT') : null, plural(msgs, 'message'), raws ? raws + ' raw' : null].filter(Boolean).join(' · ');
   const seedLabel = { seed: 'Seed words', custom: 'Custom words', xkey: 'Master key', keys: 'Private keys' }[w.kind];
   return (
     <NavShell>
@@ -30,16 +34,18 @@ export function Main() {
             : <><span class="mono muted" style={{ fontSize: '14px' }}>Fingerprint {w.fpKnown ? w.fp : 'unknown'}</span><ExportBtn small spec={{ title: 'Fingerprint', value: w.fp, file: 'fingerprint.txt' }} /></>}
         </div>
       </div>
-      <a class="homecta" href="#/source">
-        <I.IScan size={32} />
-        <div><b>Sign transaction</b><span>Scan, paste or load a PSBT</span></div>
-      </a>
+      {has('psbt') && (
+        <a class="homecta" href="#/source">
+          <I.IScan size={32} />
+          <div><b>Sign transaction</b><span>Scan, paste or load a PSBT</span></div>
+        </a>
+      )}
       <div class="tiles">
-        <a class="tile" href="#/addresses"><I.IList size={26} /><div><b>Addresses</b><span>{w.kind === 'keys' ? 'One per key' : 'xpub, descriptor'}</span></div></a>
+        <a class="tile" href="#/addresses"><I.IList size={26} /><div><b>Addresses</b><span>{(has('psbt') ? '' : 'Sign or verify · ') + (w.kind === 'keys' ? 'One per key' : 'xpub, descriptor')}</span></div></a>
         <a class="tile" href="#/seed"><I.ILock size={26} /><div><b>Seed</b><span>{seedLabel}</span></div></a>
       </div>
       <div class="card">
-        <a class="cardlink" href="#/signed"><span class="muted">Signed</span><span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>{psbts} PSBT{psbts === 1 ? '' : 's'} · {msgs} message{msgs === 1 ? '' : 's'}<I.IChev /></span></a>
+        <a class="cardlink" href="#/signed"><span class="muted">Signed</span><span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>{signedSummary}<I.IChev /></span></a>
       </div>
     </NavShell>
   );
@@ -177,7 +183,7 @@ export function WordList() {
   const shown = rows.slice(0, 300);
   return (
     <NavShell max={720} gap={16}>
-      <TitleRow back="settings" title="BIP39 word list" />
+      <TitleRow back={toolsBack()} title="BIP39 word list" />
       <div class="field">
         <label for="q" class="flabel">Find by word, number or binary</label>
         <input id="q" class="input sans" type="search" spellcheck={false} autocapitalize="none" value={q} onInput={(e) => setQ(e.currentTarget.value)} placeholder="ab · 1024 · 10000000000" />
@@ -221,7 +227,7 @@ export function LastWord() {
   };
   return (
     <NavShell max={860} gap={16}>
-      <TitleRow back="settings" title="Find the last word" />
+      <TitleRow back={toolsBack()} title="Find the last word" />
       <Seg items={[[12, '12 words'], [24, '24 words']]} value={len} onChange={(v) => { setLen(v); setPick(0); setWords(words.slice(0, v - 1)); }} />
       <div class="field" style={{ gap: '8px' }}>
         <div class="fhead">
@@ -241,7 +247,7 @@ export function LastWord() {
           <span class="note">{len === 12 ? 'With 12 words the last word carries 7 bits you choose and 4 checksum bits, so 128 words fit. Flip a coin 7 times to pick one: heads = 1, tails = 0.' : 'With 24 words the last word carries 3 bits you choose and 8 checksum bits, so 8 words fit. Flip a coin 3 times: heads = 1, tails = 0.'}</span>
         </div>
       )}
-      {G.complete ? (
+      {!has('wallet') ? null : G.complete ? (
         <div class="btncol">
           <button class="btn-primary" onClick={use}>Use “{chosen}” and verify backup</button>
           {st.wallet && <span class="note">This starts a new wallet. When you finish, it replaces the one open in this tab.</span>}
@@ -256,7 +262,8 @@ export function CheckAddress() {
   const st = useStore();
   const w = st.wallet;
   const net = st.settings.net;
-  const [addr, setAddr] = useState('');
+  const [addr, setAddr0] = useState(st.checkAddr || '');
+  const setAddr = (v) => { setAddr0(v); setState({ checkAddr: v }); };
   const [depth, setDepth] = useState(st.settings.depth || 1000);
   const [res, setRes] = useState(null);
   const [prog, setProg] = useState(null);
@@ -278,6 +285,15 @@ export function CheckAddress() {
     return () => clearTimeout(t);
   }, [addr, depth, net]);
   const N = depth.toLocaleString('en-US');
+  // Open exactly the address that was found: its key, encoded as the address that was searched.
+  const openFound = (r) => {
+    const a = addr.trim();
+    const sel = r.keyIdx !== undefined
+      ? { keyIdx: r.keyIdx, type: r.encoded, net, addr: a, from: 'check-address' }
+      : { type: r.encoded, base: r.path.split('/').slice(0, -2).join('/'), branch: r.branch, i: r.index, net, addr: a, custom: !!r.custom, from: 'check-address' };
+    setState({ addrSel: sel, sigPrefill: null });
+    go('address');
+  };
   const desc = (r) => (r.path ? (r.branch ? 'Change' : 'Receive') + ' #' + r.index + ' · ' + r.path : r.label);
   const X = res && {
     mine: { t: 'Yes, this address is in your wallet', c: 'var(--text)', b: '#FFFFFF', body: res.r && desc(res.r) + (res.r.path ? '. Found within the first ' + N + ' receive and change addresses.' : '.') },
@@ -289,7 +305,7 @@ export function CheckAddress() {
   }[res.kind];
   return (
     <NavShell max={720} gap={18}>
-      <TitleRow back="settings" title="Check an address" />
+      <TitleRow back={toolsBack()} title="Check an address" />
       <InField id="chk" label="Address" value={addr} onInput={setAddr} placeholder={net === 'main' ? 'bc1q…' : 'tb1q…'} spec={{ title: 'Address to check', onValue: (v) => { const s = typeof v === 'string' ? v : new TextDecoder().decode(v); setAddr(s.replace(/^bitcoin:/i, '').split('?')[0].trim()); } }} />
       {w.kind !== 'keys' && (
         <div class="stack" style={{ gap: '8px' }}>
@@ -300,6 +316,12 @@ export function CheckAddress() {
       )}
       {prog !== null && <div class="stack"><span class="note"><span class="spin" /> Searching… {Math.round(prog * 100)}%</span><div class="progressbar"><i style={{ width: Math.round(prog * 100) + '%' }} /></div></div>}
       {X && <div class="resultbox" style={{ borderColor: X.b }}><b style={{ color: X.c }}>{X.t}</b><span class="small">{X.body}</span></div>}
+      {res && (res.kind === 'mine' || res.kind === 'type') && (
+        <div class="stack">
+          <button class="btn-primary" onClick={() => openFound(res.r)}>Open in Addresses</button>
+          <span class="note">Shows this address with its key and path. Sign or verify a message or raw hash from there.</span>
+        </div>
+      )}
       <span class="note">Network: {NETS[net].name}. Change it on the <a href="#/addresses">Addresses</a> screen.</span>
     </NavShell>
   );

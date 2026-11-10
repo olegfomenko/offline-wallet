@@ -38,3 +38,14 @@ export const IDice = (p) => <S size={28} sw={1.6} {...p}><rect x="3.5" y="3.5" w
 export const ICoin = (p) => <S size={28} sw={1.6} {...p}><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="5" /></S>;
 export const IDraw = (p) => <S size={28} sw={1.6} {...p}><path d="M3 17c3-6 5-9 7-9s1 6 4 6 4-7 7-9" /></S>;
 export const IDownload = (p) => <S sw={2} {...p}><path d="M12 3v12M7 10l5 5 5-5" /><path d="M4 21h16" /></S>;
+
+// Side menus of the separate apps (Tools, PSBT Inspector, Addresses).
+export const IGrid = (p) => <S {...p}><rect x="4" y="4" width="7" height="7" /><rect x="13" y="4" width="7" height="7" /><rect x="4" y="13" width="7" height="7" /><rect x="13" y="13" width="7" height="7" /></S>;
+export const IQrCode = (p) => <S {...p}><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4z" /><path d="M14 14h6M14 18h6M17 14v6" /></S>;
+export const IHash = (p) => <S {...p}><path d="M5 9h14M5 15h14M10 4L8 20M16 4l-2 16" /></S>;
+export const ICurve = (p) => <S {...p}><path d="M3 17c4 0 5-10 9-10s5 10 9 10" /><circle cx="12" cy="7" r="1.5" /></S>;
+export const IWords = (p) => <S {...p}><path d="M4 5h16M4 10h16M4 15h10M4 20h10" /></S>;
+export const ILastWord = (p) => <S {...p}><path d="M4 6h10M4 12h10M4 18h6" /><path d="M16 16l2 2 4-4" /></S>;
+export const IPen = (p) => <S {...p}><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="M13 7l4 4" /></S>;
+export const IFind = (p) => <S {...p}><circle cx="11" cy="11" r="7" /><path d="M20 20l-4-4" /></S>;
+export const IKeyCheck = (p) => <S {...p}><circle cx="8" cy="15" r="4" /><path d="M11 12l9-9M17 6l3 3" /></S>;

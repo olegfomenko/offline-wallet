@@ -4,6 +4,7 @@ import { h, Fragment } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { go, current } from './router.js';
 import { getState, setState, resetAll } from './store.js';
+import { app, has } from './app.js';
 import * as I from './icons.jsx';
 import { netStatus, onNetChange } from './net.js';
 import { KbdButton } from './Keyboard.jsx';
@@ -47,14 +48,7 @@ export function FlowShell({ max = 600, gap = 20, children }) {
   );
 }
 
-const NAV = [
-  ['main', 'Home', I.IHome, ['main']],
-  ['source', 'Sign transaction', I.IScan, ['source', 'load', 'notpsbt', 'review', 'anti-exfil', 'signed-export', 'psbt-details']],
-  ['addresses', 'Addresses', I.IList, ['addresses', 'address-help', 'edit-path', 'address', 'private-key', 'sign-verify', 'anti-exfil-msg']],
-  ['signed', 'Signed', I.ISigned, ['signed']],
-  ['seed', 'Seed', I.ILock, ['seed']],
-  ['settings', 'Settings', I.IGear, ['settings', 'wordlist', 'lastword', 'check-address', 'check-passphrase', 'text-qr', 'hash', 'secp256k1']],
-];
+// Each app's side menu comes from its entry file (src/apps/*.jsx): [route, label, Icon, routes it covers].
 
 export function walletLabel(w) {
   if (!w) return '';
@@ -101,14 +95,14 @@ export function NavShell({ max = 1040, gap = 24, children }) {
           : <span class="mbar-net" title="Offline · no network"><I.INoNet />Offline</span>}
       </header>
       {open && <button class="navscrim" aria-label="Close menu" tabindex={-1} onClick={() => close(false)} />}
-      <nav id="ow-nav" aria-label="Wallet" class="side" data-open={open ? 'true' : 'false'}>
+      <nav id="ow-nav" aria-label={app().sub} class="side" data-open={open ? 'true' : 'false'}>
         <div class="sidehead">
-          <Brand sub="Bitcoin · single-sig" />
+          <Brand sub={app().sub} />
           <button ref={closeBtn} class="navclose" aria-label="Close menu" onClick={() => close(true)}><I.IClose size={22} sw={1.8} /></button>
         </div>
         {w && <div class="walletchip"><span>{walletLabel(w)}</span><b>{w.kind === 'keys' ? w.keys.length + ' key' + (w.keys.length > 1 ? 's' : '') : w.fp}</b></div>}
         <div class="navlist">
-          {NAV.map(([id, label, Icon, group]) => (
+          {app().nav.map(([id, label, Icon, group]) => (
             <a key={id} href={'#/' + id} class={group.includes(route) ? 'on' : ''} aria-current={group.includes(route) ? 'page' : undefined} onClick={() => setOpen(false)}>
               <span class="ic"><Icon /></span>{label}
             </a>
@@ -118,7 +112,7 @@ export function NavShell({ max = 1040, gap = 24, children }) {
           {net === 'online' ? <span class="offl online" title={NET_ONLINE_TIP}><I.INet />Network detected</span>
             : net === 'unknown' ? <span class="offl unknown" title={NET_UNKNOWN_TIP}><I.IWarn size={16} />Can’t check network</span>
             : <span class="offl"><I.INoNet />Offline · no network</span>}
-          <button class="btn-secondary bold btn-sm" title="Nothing is saved. The wallet is forgotten when you close this tab." onClick={() => { setOpen(false); resetAll(); go('welcome'); }}>Close wallet</button>
+          {has('wallet') && w && <button class="btn-secondary bold btn-sm" title="Nothing is saved. The wallet is forgotten when you close this tab." onClick={() => { setOpen(false); resetAll(); go(app().start); }}>Close wallet</button>}
         </div>
       </nav>
       <main class="navmain">
@@ -302,3 +296,31 @@ export function fmtAmt(sats, unit, withUnit = true) {
 }
 
 export { I };
+
+/** The "?" button at the end of a title row. */
+export function HelpButton({ label, onClick }) {
+  return <button class="helpbtn" aria-label={label} aria-haspopup="dialog" onClick={onClick}><span aria-hidden="true">?</span></button>;
+}
+/** A help section: a small heading and a list. */
+export const HelpSec = ({ t, children }) => <section class="helpsec"><h3>{t}</h3><ul>{children}</ul></section>;
+/** The help panel the "?" opens: dialog on desktop, bottom sheet on phones. Escape closes it and focus goes back. */
+export function HelpDialog({ id, title, onClose, children }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const back = document.activeElement;
+    if (ref.current) ref.current.focus();
+    const f = (e) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } };
+    window.addEventListener('keydown', f);
+    return () => { window.removeEventListener('keydown', f); if (back && back.focus) back.focus(); };
+  }, []);
+  return (
+    <div class="scrim">
+      <button class="closer" aria-label="Close" tabIndex={-1} onClick={onClose} />
+      <div role="dialog" aria-modal="true" aria-labelledby={id} class="dialog helpdlg">
+        <span aria-hidden="true" class="handle" />
+        <div class="dhead"><h2 id={id} class="ttl">{title}</h2><button ref={ref} class="xbtn" aria-label="Close" onClick={onClose}><I.IClose /></button></div>
+        {children}
+      </div>
+    </div>
+  );
+}

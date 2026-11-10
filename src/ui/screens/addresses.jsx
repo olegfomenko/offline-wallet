@@ -4,7 +4,7 @@ import { h, Fragment } from 'preact';
 import { useState, useMemo, useEffect, useRef } from 'preact/hooks';
 import { go } from '../router.js';
 import { getState, setState, patch, useStore, addLog } from '../store.js';
-import { NavShell, TitleRow, Seg, Chips, UTabs, OutField, ExportBtn, InField, I, Addr, shortAddr, fmtTime } from '../kit.jsx';
+import { NavShell, TitleRow, Seg, Chips, UTabs, OutField, ExportBtn, InField, I, Addr, shortAddr, fmtTime, HelpDialog, HelpSec, HelpButton } from '../kit.jsx';
 import { accountOf, resolveSel } from '../account.js';
 import { download } from '../io.js';
 import { accountKeys, addressAt } from '../../core/wallet.js';
@@ -302,7 +302,7 @@ export function AddressDetail() {
   };
   return (
     <NavShell max={1040} gap={18}>
-      <TitleRow back="addresses" title={title} sub={T.label + (sel.custom ? ' · custom path' : '')} />
+      <TitleRow back={sel.from || 'addresses'} title={title} sub={T.label + (sel.custom ? ' · custom path' : '')} />
       <div class="cols2">
         <div>
           <div class="field">
@@ -397,21 +397,9 @@ export function logSignature({ raw, alg, efmt, mfmt, msg, bytes, sig, address, w
 
 /** The "?" panel: how the signing options work, instead of notes under every field. */
 function SignHelp({ onClose }) {
-  const ref = useRef(null);
-  useEffect(() => {
-    const back = document.activeElement;
-    if (ref.current) ref.current.focus();
-    const f = (e) => { if (e.key === 'Escape') { e.preventDefault(); onClose(); } };
-    window.addEventListener('keydown', f);
-    return () => { window.removeEventListener('keydown', f); if (back && back.focus) back.focus(); };
-  }, []);
-  const Sec = ({ t, children }) => <section class="helpsec"><h3>{t}</h3><ul>{children}</ul></section>;
+  const Sec = HelpSec;
   return (
-    <div class="scrim">
-      <button class="closer" aria-label="Close" tabIndex={-1} onClick={onClose} />
-      <div role="dialog" aria-modal="true" aria-labelledby="sv-help-title" class="dialog helpdlg">
-        <span aria-hidden="true" class="handle" />
-        <div class="dhead"><h2 id="sv-help-title" class="ttl">How signing works</h2><button ref={ref} class="xbtn" aria-label="Close" onClick={onClose}><I.IClose /></button></div>
+    <HelpDialog id="sv-help-title" title="How signing works" onClose={onClose}>
         <Sec t="Message">
           <li><b>ECDSA:</b> a classic Bitcoin signed message (BIP-137). The message gets the “Bitcoin Signed Message” prefix and is hashed, so the signature can never spend coins. 65 bytes; Electrum, Sparrow and most wallets verify it with just the address.</li>
           <li><b>Schnorr:</b> BIP-340 over the BIP-322 message hash, 64 bytes. Verifiers need your x-only public key. Few wallets check it yet.</li>
@@ -433,8 +421,7 @@ function SignHelp({ onClose }) {
         <Sec t="Verify">
           <li>ECDSA checks against an address; Schnorr checks against an x-only public key. Nothing leaves this computer.</li>
         </Sec>
-      </div>
-    </div>
+    </HelpDialog>
   );
 }
 
@@ -446,7 +433,10 @@ export function SignVerify() {
   const pre = st.sigPrefill;
   const done = st.sigDone; // back from anti-exfil signing with its signature
   const [S, set0] = useState(() => {
-    const base = { tab: 'sign', what: 'msg', alg: 'ecdsa', mfmt: 'text', msg: '', dfmt: 'hex', dig: '', msgErr: '', sig: null, ae: false, efmt: null, sfmt: 'b64', vfmt: 'b64', vsig: '', who: null, res: null, help: false };
+    // A Taproot address spends with Schnorr, so it starts there; ECDSA stays one tap away.
+    let tr = false;
+    try { tr = !!sel && resolveSel(w, sel, net).type === 'tr'; } catch (e) { /* resolved again below */ }
+    const base = { tab: 'sign', what: 'msg', alg: tr ? 'schnorr' : 'ecdsa', mfmt: 'text', msg: '', dfmt: 'hex', dig: '', msgErr: '', sig: null, ae: false, efmt: null, sfmt: 'b64', vfmt: 'b64', vsig: '', who: null, res: null, help: false };
     if (done) return { ...base, what: done.what, alg: done.alg, mfmt: done.mfmt, msg: done.msg, dfmt: done.dfmt, dig: done.dig, sig: done.sig, efmt: done.efmt, ae: true };
     if (pre) return { ...base, tab: 'verify', what: pre.what || 'msg', alg: pre.alg, mfmt: pre.mfmt || 'text', msg: pre.msg || '', dfmt: pre.dfmt || 'hex', dig: pre.dig || '', vfmt: pre.vfmt, vsig: pre.sig, who: pre.who };
     return base;
@@ -511,7 +501,7 @@ export function SignVerify() {
   return (
     <NavShell max={1040} gap={16}>
       <TitleRow back="address" onBack={() => { setState({ sigPrefill: null }); go('address'); }} title="Sign or verify"
-        right={<button class="helpbtn" aria-label="How signing works" aria-haspopup="dialog" onClick={() => set({ help: true })}><span aria-hidden="true">?</span></button>} />
+        right={<HelpButton label="How signing works" onClick={() => set({ help: true })} />} />
       <div style={{ display: 'flex', gap: '10px', alignItems: 'baseline', flexWrap: 'wrap' }}><span style={{ fontWeight: 600 }}>{label}</span><span class="mono muted" style={{ fontSize: '13px' }}>{shortAddr(R.address, 8, 6)}</span></div>
       <Seg items={[['sign', 'Sign'], ['verify', 'Verify']]} value={S.tab} onChange={(t) => set({ tab: t, res: null })} />
       <div class="cols2">

@@ -2,7 +2,8 @@
 import { h, Fragment } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
 import { useStore } from '../store.js';
-import { NavShell, TitleRow, Seg, Chips, InField, ImportBtn, ExportBtn } from '../kit.jsx';
+import { has, toolsBack } from '../app.js';
+import { NavShell, TitleRow, Seg, Chips, InField, ImportBtn, ExportBtn, I } from '../kit.jsx';
 import { Keyboard, useKbd } from '../Keyboard.jsx';
 import { QR } from '../sheet.jsx';
 import { useFingerprint } from './create.jsx';
@@ -11,6 +12,28 @@ import { textQRFrames } from '../../core/transport.js';
 import { utf8, hex } from '../../core/util.js';
 import { decodeBytes, encodeBytes, textToBytes, bytesToText } from '../../core/encoding.js';
 import { digest, parseNum, formatNum, modN, N, G, parsePoint, encodePoint, ecOp, yOdd } from '../../core/calc.js';
+
+// ---------- Tools home (the Tools app's start screen) ----------
+const TOOL_CARDS = [
+  ['text-qr', 'Text to QR', 'Show any text as a QR code', I.IQrCode],
+  ['hash', 'SHA-256 · SHA-512', 'Hash text, hex or Base64', I.IHash],
+  ['secp256k1', 'secp256k1 calculator', 'k × P, P + Q, 2P · any point format', I.ICurve],
+  ['wordlist', 'BIP39 word list', 'All 2048 words, decimal and binary', I.IWords],
+  ['lastword', 'Find the last word', 'Checksum for 11 or 23 words you chose', I.ILastWord],
+];
+export function ToolsHome() {
+  return (
+    <NavShell max={1040} gap={12}>
+      <h1>Tools</h1>
+      <p class="lead">Offline helpers. They need no wallet and keep nothing.</p>
+      <div class="toolcards">
+        {TOOL_CARDS.map(([to, t, d, Icon]) => (
+          <a key={to} class="toolcard" href={'#/' + to}><span class="ic"><Icon /></span><span><b>{t}</b><small>{d}</small></span></a>
+        ))}
+      </div>
+    </NavShell>
+  );
+}
 
 // ---------- Check passphrase ----------
 export function CheckPassphrase() {
@@ -22,7 +45,7 @@ export function CheckPassphrase() {
   if (!src) {
     return (
       <NavShell max={640} gap={16}>
-        <TitleRow back="settings" title="Check passphrase" />
+        <TitleRow back={toolsBack()} title="Check passphrase" />
         <p class="lead">This wallet was restored from a key, not from seed words, so it has no passphrase to check.</p>
       </NavShell>
     );
@@ -32,7 +55,7 @@ export function CheckPassphrase() {
   const col = !p1 || !fp ? 'var(--line)' : ok ? 'var(--accent)' : 'var(--danger)';
   return (
     <NavShell max={640} gap={16}>
-      <TitleRow back="settings" title="Check passphrase" />
+      <TitleRow back={toolsBack()} title="Check passphrase" />
       <p class="lead">Type the passphrase from your backup. If it gives this wallet’s fingerprint, the backup is right. Nothing is saved.</p>
       <InField id="cp1" label="Passphrase" priv password mono={false} value={p1} onInput={setP1} placeholder="Enter passphrase"
         kb={{ what: 'the passphrase', isOpen: kb.id === 'p1', open: () => kb.open('p1') }} />
@@ -95,7 +118,7 @@ export function TextQr() {
 
   return (
     <NavShell max={760} gap={12}>
-      <TitleRow back="settings" title="Text to QR" />
+      <TitleRow back={toolsBack()} title="Text to QR" />
       <p class="lead">Show any text as a QR code: a note, an address, a URL, a descriptor. Nothing is kept.</p>
       <div class="qrtool">
         <div class="stack" style={{ gap: '16px', minWidth: 0 }}>
@@ -183,7 +206,7 @@ export function HashTool() {
   const out = d ? encodeBytes(d, S.outFmt) : '';
   return (
     <NavShell max={1120} gap={16}>
-      <TitleRow back="settings" title="SHA-256 · SHA-512" />
+      <TitleRow back={toolsBack()} title="SHA-256 · SHA-512" />
       <p class="lead">Hash any text or bytes. Computed on this computer as you type.</p>
       <div class="cols2">
         <div>
@@ -263,7 +286,7 @@ export function Secp256k1Tool() {
   const qIn = <PointIn id="ec-q" label="Point Q" f={S.q} onChange={(q) => set({ q })} />;
   return (
     <NavShell max={1120} gap={16}>
-      <TitleRow back="settings" title="secp256k1 calculator" />
+      <TitleRow back={toolsBack()} title="secp256k1 calculator" />
       <p class="lead">Point arithmetic on the Bitcoin curve: multiply a point by a scalar, add two points, or double one. Use it to check keys, nonces and tweaks by hand.</p>
       <div class="cols2">
         <div>
@@ -271,7 +294,7 @@ export function Secp256k1Tool() {
           {S.op === 'mul' ? <>{kField}{pIn}</> : S.op === 'add' ? <>{pIn}{qIn}</> : pIn}
         </div>
         <div>
-          <div class="stack"><span id="ec-fmt" class="small">Result format</span><Seg items={[['comp', 'Compressed'], ['xonly', 'x-only'], ['uncomp', 'Uncompressed']]} value={S.fmt} labelledBy="ec-fmt" onChange={(v) => set({ fmt: v })} /></div>
+          <div class="stack"><span id="ec-fmt" class="small">Result format</span><Seg items={[['comp', 'Com\u00ADpressed'], ['xonly', 'x-only'], ['uncomp', 'Uncom\u00ADpressed']]} value={S.fmt} labelledBy="ec-fmt" onChange={(v) => set({ fmt: v })} /></div>
           <CalcOut label={'Result · ' + what} meta={res ? '· ' + PT_FMT[S.fmt] : ''} value={rv} empty={ready ? 'Point at infinity (no encoding)' : 'Fill in the inputs'}
             chips={<Chips label="Result format" items={[['hex', 'Hex'], ['b64', 'Base64']]} value={S.rEnc} onChange={(v) => set({ rEnc: v })} />}
             spec={{ title: 'Result · ' + what, file: 'point.txt' }}

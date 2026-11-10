@@ -1,22 +1,65 @@
 # Offline Signer
 
-An offline, single-sig Bitcoin signer that compiles to **one self-contained HTML file**
-(`offline-signer.html`, about 500 KB), published at
-<https://olegfomenko.github.io/offline-wallet/>. Download it, then open it from a USB stick on a
-computer that never goes online. It creates or restores a wallet, exports the xpub or descriptor to a watch-only wallet, and
-signs PSBTs that arrive by QR, text or file. Nothing is saved: the wallet lives only in the open tab.
+An offline, single-sig Bitcoin signer. Each app compiles to **one self-contained HTML file**,
+published at <https://olegfomenko.github.io/offline-wallet/>. Download one, then open it from a USB
+stick on a computer that never goes online. It creates or restores a wallet, exports the xpub or
+descriptor to a watch-only wallet, and signs PSBTs that arrive by QR, text or file. Nothing is saved:
+the wallet lives only in the open tab.
 
 The UI follows the *Offline Bitcoin Wallet · Web* design canvas (Blockstream Blueprint styling) and
-implements all 34 screens. The build approach follows
+implements its screens for all four apps. The build approach follows
 [EntropyLab](https://github.com/OogaBoogaX/entropylab): sources in `src/`, everything inlined into one
 file, and a strict Content-Security-Policy with no network access.
 
 > **Experimental software.** It was tested against published test vectors and reviewed for PSBT
 > attacks, but it has not had a professional audit. Try it with small amounts and a test wallet first.
 
+## Pages
+
+| App                  | Open                                                                      | File                                                                                            | Has a wallet | Use it for                                                     |
+|----------------------|---------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|--------------|----------------------------------------------------------------|
+| **Full** (main page) | [Open Full](https://olegfomenko.github.io/offline-wallet/)                | [`offline-signer.html`](https://olegfomenko.github.io/offline-wallet/offline-signer.html)       | Yes          | Everything in one file: wallet, PSBT review and signing, tools |
+| **Addresses**        | [Open Addresses](https://olegfomenko.github.io/offline-wallet/addresses/) | [`offline-addresses.html`](https://olegfomenko.github.io/offline-wallet/offline-addresses.html) | Yes          | Keys and addresses; signing messages and raw hashes            |
+| **PSBT Inspector**   | [Open Inspector](https://olegfomenko.github.io/offline-wallet/inspector/) | [`psbt-inspector.html`](https://olegfomenko.github.io/offline-wallet/psbt-inspector.html)       | No           | Reviewing a PSBT and collecting signatures input by input      |
+| **Tools**            | [Open Tools](https://olegfomenko.github.io/offline-wallet/tools/)         | [`offline-tools.html`](https://olegfomenko.github.io/offline-wallet/offline-tools.html)         | No           | QR, hashes, secp256k1 math, BIP39 words                        |
+| Checksums            |                                                                           | [`SHA256SUMS`](https://olegfomenko.github.io/offline-wallet/SHA256SUMS)                         |              | Hashes of the four files                                       |
+
+The pages are for trying the apps. For real keys, download the file, check its hash against
+`SHA256SUMS`, and open it on an offline computer (see Use).
+
+## Four apps
+
+The same sources build four files. Each has only its own screens; the build checks that
+no other app's screens slipped in.
+
+| File                                       | Size    | What it does                                                                                                                                      |
+|--------------------------------------------|---------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `offline-signer.html` (**Full**)           | ~530 KB | Everything below in one file: wallet, PSBT review and signing, Settings with the tools.                                                           |
+| `offline-addresses.html` (**Addresses**)   | ~450 KB | Create or restore a wallet, addresses and xpubs, sign or verify messages and raw hashes, check an address or a passphrase. No PSBTs, no Settings. |
+| `psbt-inspector.html` (**PSBT Inspector**) | ~380 KB | No private keys. Loads and reviews a PSBT, shows each input's hash to sign, checks the signatures you bring back and builds the signed PSBT.      |
+| `offline-tools.html` (**Tools**)           | ~245 KB | No wallet. Text to QR, SHA-256 · SHA-512, secp256k1 calculator, BIP39 word list, find the last word.                                              |
+
+**Inspector and Addresses together** split review from keys, for example over two offline devices:
+
+1. Inspector: **Load transaction**, optionally with a watch-only key (xpub, zpub or descriptor, never a
+   private key). With it, input ownership and change are proven from their paths. Without it, they
+   are taken from the PSBT's own key paths and marked "not checked".
+2. Review, then **Sign inputs**. Each input of the wallet shows its address, path and the 32-byte
+   hash to sign (the BIP143/BIP341/legacy sighash).
+3. Addresses: **Check an address** → **Open in Addresses** → **Sign / verify** → **Raw hash** → scan the
+   hash → sign. ECDSA gives DER; Taproot addresses start on Schnorr with the tweaked key.
+4. Inspector: scan the signature into that input. It must be low-S, strict DER (the sighash byte is
+   added if missing, and must match if present) or 64/65-byte Schnorr, and verify against the input's
+   key and hash. **Finish** gives the signed PSBT and final transaction.
+
+Inputs can be signed in any order and over several sittings: **Export partially signed PSBT** once at
+least one input is signed; loading that file again shows those inputs as "✓ Already signed". The
+Full app has the same screen behind **Keys on another device? Sign inputs one by one** on its
+review.
+
 ## Use
 
-1. Download `offline-signer.html` and `SHA256SUMS` from
+1. Download the app you need (`offline-signer.html` for everything) and `SHA256SUMS` from
    <https://olegfomenko.github.io/offline-wallet/>, or build it yourself (see Build).
    `shasum -a 256 offline-signer.html` must match `SHA256SUMS`. Building from source gives the same
    hash.
@@ -109,34 +152,34 @@ All libraries are vendored from tagged upstream commits (see `vendor/VENDORED.md
 `@scure` libraries are Paul Miller's audited, dependency-free implementations, the same ones
 EntropyLab uses as test oracles.
 
-| Primitive | Used for | Library (module) | Standard |
-|---|---|---|---|
-| CSPRNG (`crypto.getRandomValues`) | Seed entropy (32 bytes XORed into the seed), BIP340 aux randomness, backup-check positions | Web Crypto API (browser) | — |
-| SHA-256 / double SHA-256 | Entropy hashing, BIP39 checksum, Base58Check, txids, sighashes, message hash, UR RNG seeding | `@noble/hashes/sha2` | FIPS 180-4 |
-| Tagged SHA-256 | Taproot tweak, BIP-322 message hash, BIP340 | `@noble/hashes` (+ `@noble/curves`, `@scure/btc-signer`) | BIP340/341/322 |
-| HMAC-SHA512 | BIP32 child key derivation, master key from seed | `@noble/hashes/hmac` via `@scure/bip32` | RFC 2104, BIP32 |
-| PBKDF2-HMAC-SHA512 (2048 rounds) | BIP39 seed from words and passphrase; custom words, Electrum-compatible | `@noble/hashes/pbkdf2` via `@scure/bip39`, and directly | RFC 8018, BIP39 |
-| RIPEMD-160 (HASH160) | P2PKH, P2WPKH and P2SH hashes, BIP32 fingerprints | `@noble/hashes/legacy` | — |
-| secp256k1 ECDSA, RFC 6979 nonces, low-S, low-R | Signing legacy, nested and native SegWit inputs; BIP-137 message signatures with public key recovery; raw 32-byte digests (65 bytes or DER) | `@noble/curves/secp256k1` (via `@scure/btc-signer` for PSBTs) | SEC 2, RFC 6979, BIP62/137 |
-| Schnorr signatures | Taproot key-path signing; Schnorr message signatures | `@noble/curves/secp256k1` `schnorr` | BIP340 |
-| SHA-256, SHA-512, secp256k1 point addition, doubling and scalar multiplication | Settings → Tools calculators | `@noble/hashes/sha2`, `@noble/curves/secp256k1` (via `calc.js`) | FIPS 180-4, SEC 2 |
-| Anti-exfil nonces: SHA-256 commitment, RFC 6979 / BIP340 nonce with the commitment as extra data, tweak `R + SHA256(R‖data)·G`, signing with the tweaked nonce | Anti-exfil signing of messages and PSBT inputs | own (`antiexfil.js`) on `@noble/curves` (point and scalar math, HMAC-DRBG) and `@noble/hashes` | Blockstream anti-exfil, RFC 6979, BIP340 |
-| Taproot output key tweak | P2TR addresses (BIP86), key-path signing | `@scure/btc-signer` on `@noble/curves` | BIP341/86 |
-| BIP32 HD derivation | All keys, xpub/xprv | `@scure/bip32` | BIP32/44/49/84/86 |
-| SLIP-132 version bytes | ypub/zpub/upub/vpub and their private keys | own (`src/core/hd.js`) | SLIP-132 |
-| BIP39 wordlist and checksum | Mnemonics, word validation, finding the last word | `@scure/bip39` + own (`wallet.js`) | BIP39 |
-| scrypt | BIP38 decryption (N=16384, r=8, p=8) | `@noble/hashes/scrypt` (`scryptAsync`) | RFC 7914, BIP38 |
-| AES-256-ECB | BIP38 decryption, both modes | `@noble/ciphers/aes` | FIPS 197, BIP38 |
-| secp256k1 scalar multiplication | BIP38 EC-multiply mode; public keys | `@noble/curves/secp256k1` | BIP38 |
-| Base58Check | WIF, extended keys, legacy addresses | `@scure/base` | — |
-| Bech32 / Bech32m | SegWit v0 and v1 addresses | `@scure/base` via `@scure/btc-signer` | BIP173/350 |
-| Base64, hex, Base32 | PSBT text; BBQr | `@scure/base` | RFC 4648 |
-| Base43 | Electrum's static QR | own (`transport.js`) | Electrum |
-| PSBT v0/v2, sighash, finalization | Parse, sign, finalize, extract | `@scure/btc-signer` (+ `micro-packed`) | BIP174/370/143/341 |
-| Output descriptor checksum | Descriptor export and parsing | own (`hd.js`) | BIP380 |
-| CRC32, Xoshiro256\*\*, alias sampler, CBOR subset | UR fountain codes (animated QR) | own (`ur.js`), ported from the Blockchain Commons reference and checked against its test vectors | BCR-2020-005/006 |
-| Raw DEFLATE (inflate only, with a size cap) | BBQr "Z" encoding | `fflate` | RFC 1951 |
-| QR encode/decode (Reed–Solomon over GF(256)) | Every QR shown or scanned, SeedQR | `qr` (paulmillr) | ISO/IEC 18004 |
+| Primitive                                                                                                                                                      | Used for                                                                                                                                    | Library (module)                                                                                 | Standard                                 |
+|----------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------|------------------------------------------|
+| CSPRNG (`crypto.getRandomValues`)                                                                                                                              | Seed entropy (32 bytes XORed into the seed), BIP340 aux randomness, backup-check positions                                                  | Web Crypto API (browser)                                                                         | —                                        |
+| SHA-256 / double SHA-256                                                                                                                                       | Entropy hashing, BIP39 checksum, Base58Check, txids, sighashes, message hash, UR RNG seeding                                                | `@noble/hashes/sha2`                                                                             | FIPS 180-4                               |
+| Tagged SHA-256                                                                                                                                                 | Taproot tweak, BIP-322 message hash, BIP340                                                                                                 | `@noble/hashes` (+ `@noble/curves`, `@scure/btc-signer`)                                         | BIP340/341/322                           |
+| HMAC-SHA512                                                                                                                                                    | BIP32 child key derivation, master key from seed                                                                                            | `@noble/hashes/hmac` via `@scure/bip32`                                                          | RFC 2104, BIP32                          |
+| PBKDF2-HMAC-SHA512 (2048 rounds)                                                                                                                               | BIP39 seed from words and passphrase; custom words, Electrum-compatible                                                                     | `@noble/hashes/pbkdf2` via `@scure/bip39`, and directly                                          | RFC 8018, BIP39                          |
+| RIPEMD-160 (HASH160)                                                                                                                                           | P2PKH, P2WPKH and P2SH hashes, BIP32 fingerprints                                                                                           | `@noble/hashes/legacy`                                                                           | —                                        |
+| secp256k1 ECDSA, RFC 6979 nonces, low-S, low-R                                                                                                                 | Signing legacy, nested and native SegWit inputs; BIP-137 message signatures with public key recovery; raw 32-byte digests (65 bytes or DER) | `@noble/curves/secp256k1` (via `@scure/btc-signer` for PSBTs)                                    | SEC 2, RFC 6979, BIP62/137               |
+| Schnorr signatures                                                                                                                                             | Taproot key-path signing; Schnorr message signatures                                                                                        | `@noble/curves/secp256k1` `schnorr`                                                              | BIP340                                   |
+| SHA-256, SHA-512, secp256k1 point addition, doubling and scalar multiplication                                                                                 | Tools calculators (Settings → Tools in Full, the Tools app)                                                                                 | `@noble/hashes/sha2`, `@noble/curves/secp256k1` (via `calc.js`)                                  | FIPS 180-4, SEC 2                        |
+| Anti-exfil nonces: SHA-256 commitment, RFC 6979 / BIP340 nonce with the commitment as extra data, tweak `R + SHA256(R‖data)·G`, signing with the tweaked nonce | Anti-exfil signing of messages and PSBT inputs                                                                                              | own (`antiexfil.js`) on `@noble/curves` (point and scalar math, HMAC-DRBG) and `@noble/hashes`   | Blockstream anti-exfil, RFC 6979, BIP340 |
+| Taproot output key tweak                                                                                                                                       | P2TR addresses (BIP86), key-path signing                                                                                                    | `@scure/btc-signer` on `@noble/curves`                                                           | BIP341/86                                |
+| BIP32 HD derivation                                                                                                                                            | All keys, xpub/xprv                                                                                                                         | `@scure/bip32`                                                                                   | BIP32/44/49/84/86                        |
+| SLIP-132 version bytes                                                                                                                                         | ypub/zpub/upub/vpub and their private keys                                                                                                  | own (`src/core/hd.js`)                                                                           | SLIP-132                                 |
+| BIP39 wordlist and checksum                                                                                                                                    | Mnemonics, word validation, finding the last word                                                                                           | `@scure/bip39` + own (`wallet.js`)                                                               | BIP39                                    |
+| scrypt                                                                                                                                                         | BIP38 decryption (N=16384, r=8, p=8)                                                                                                        | `@noble/hashes/scrypt` (`scryptAsync`)                                                           | RFC 7914, BIP38                          |
+| AES-256-ECB                                                                                                                                                    | BIP38 decryption, both modes                                                                                                                | `@noble/ciphers/aes`                                                                             | FIPS 197, BIP38                          |
+| secp256k1 scalar multiplication                                                                                                                                | BIP38 EC-multiply mode; public keys                                                                                                         | `@noble/curves/secp256k1`                                                                        | BIP38                                    |
+| Base58Check                                                                                                                                                    | WIF, extended keys, legacy addresses                                                                                                        | `@scure/base`                                                                                    | —                                        |
+| Bech32 / Bech32m                                                                                                                                               | SegWit v0 and v1 addresses                                                                                                                  | `@scure/base` via `@scure/btc-signer`                                                            | BIP173/350                               |
+| Base64, hex, Base32                                                                                                                                            | PSBT text; BBQr                                                                                                                             | `@scure/base`                                                                                    | RFC 4648                                 |
+| Base43                                                                                                                                                         | Electrum's static QR                                                                                                                        | own (`transport.js`)                                                                             | Electrum                                 |
+| PSBT v0/v2, sighash, finalization                                                                                                                              | Parse, sign, finalize, extract                                                                                                              | `@scure/btc-signer` (+ `micro-packed`)                                                           | BIP174/370/143/341                       |
+| Output descriptor checksum                                                                                                                                     | Descriptor export and parsing                                                                                                               | own (`hd.js`)                                                                                    | BIP380                                   |
+| CRC32, Xoshiro256\*\*, alias sampler, CBOR subset                                                                                                              | UR fountain codes (animated QR)                                                                                                             | own (`ur.js`), ported from the Blockchain Commons reference and checked against its test vectors | BCR-2020-005/006                         |
+| Raw DEFLATE (inflate only, with a size cap)                                                                                                                    | BBQr "Z" encoding                                                                                                                           | `fflate`                                                                                         | RFC 1951                                 |
+| QR encode/decode (Reed–Solomon over GF(256))                                                                                                                   | Every QR shown or scanned, SeedQR                                                                                                           | `qr` (paulmillr)                                                                                 | ISO/IEC 18004                            |
 
 The UI is Preact 10. No other code runs. The build fails if the bundle contains `fetch`,
 `XMLHttpRequest`, `WebSocket`, `EventSource`, `sendBeacon`, `RTCPeerConnection` or
@@ -151,28 +194,33 @@ Needs Node 22.18 or newer. The only package npm installs is esbuild. All runtime
 
 ```sh
 npm ci             # once: installs esbuild exactly as pinned in package-lock.json
-npm run build      # → dist/offline-signer.html and dist/SHA256SUMS
+npm run build      # → dist/offline-signer.html, offline-addresses.html, psbt-inspector.html,
+                   #   offline-tools.html and dist/SHA256SUMS
 ```
 
 `dist/` is not committed. The build is reproducible: the same sources and esbuild version give a
-byte-identical file, so you can rebuild and compare the hash with the published `SHA256SUMS`.
+byte-identical files, so you can rebuild and compare the hash with the published `SHA256SUMS`.
 
 ### CI and GitHub Pages
 
 `.github/workflows/ci.yml` runs on every push and pull request: `npm ci`, `npm test`, `npm run build`,
-then a second build that must match the first byte for byte. It prints the SHA-256 in the log. On
-`master` it publishes `index.html`, `offline-signer.html` and `SHA256SUMS` to GitHub Pages. Every
+then a second build whose four files must match the first byte for byte. It prints the SHA-256s in
+the log. On `master` it publishes every app to GitHub Pages (see [Pages](#pages)), each at its
+short folder URL (`/addresses/`, `/inspector/`, `/tools/`; the Full app at `/` and `/full/`) and
+at its file name. All URLs of one app serve the same file, so its hash matches `SHA256SUMS`. Every
 action is pinned to a full commit hash.
 
 To turn Pages on once: in the repository's **Settings → Pages**, set **Source** to **GitHub Actions**.
 
-`scripts/build.mjs` bundles `src/main.jsx` with esbuild, inlines the JS and CSS into
-`src/index.html`, and writes the SHA-256. It refuses to build if a network API appears in the bundle.
+`scripts/build.mjs` bundles each entry in `src/apps/` with esbuild, inlines the JS and CSS into
+`src/index.html`, and writes the SHA-256s. It refuses to build if a network API appears in a bundle,
+or if an app contains screens meant for another (for example wallet creation in the Inspector or
+Tools).
 
 ## Test
 
 ```sh
-npm test               # 64 tests on node:test: BIP32/39/44/49/84/86 vectors, SLIP-132, BIP380, WIF,
+npm test               # 73 tests on node:test: BIP32/39/44/49/84/86 vectors, SLIP-132, BIP380, WIF,
                        # BIP38, BIP-137/340 messages, UR (bc-ur reference vectors), BBQr (Coinkite's
                        # real scan), Base43, QR round trips, PSBT sign/finalize for all four script
                        # types, PSBT attack regressions, private-key restore round trips, and the
@@ -180,12 +228,14 @@ npm test               # 64 tests on node:test: BIP32/39/44/49/84/86 vectors, SL
                        # and anti-exfil signing (nonces match RFC 6979 / BIP340, host checks,
                        # BIP-137/340 messages, PSBTs of all four script types and mixed inputs),
                        # raw-digest signing (DER, 65 bytes, Taproot tweaked key),
-                       # and the Settings calculators (SHA-256/512 vectors, secp256k1 point math)
+                       # the calculators (SHA-256/512 vectors, secp256k1 point math),
+                       # and the Inspector (review with a watch-only key or none, per-input hashes
+                       # that match what the Full app signs, signature checks, partial signing)
 npm run fixtures       # sample PSBTs for the public test seed "abandon … about" in test/data/
 ```
 
 There are no automated UI tests. Test the UI by hand: open `dist/offline-signer.html` in a browser,
-restore the test seed below, and load the sample PSBTs from `test/data/`.
+or the other three apps, restore the test seed below, and load the sample PSBTs from `test/data/`.
 
 The tests import the sources directly. Node strips the TypeScript types in the vendored files
 itself, and `scripts/node-hooks.mjs` maps `@noble/…`, `@scure/…` and similar imports to `vendor/`,
@@ -204,7 +254,9 @@ src/core/   wallet, hd (paths, SLIP-132, descriptors), keys (WIF, BIP38), entrop
             encoding (text ↔ hex/Base64/UTF-8 bytes), util
 src/ui/     store (in-memory state), router, kit (value-field pattern), sheet (export/import),
             io (QR, webcam, clipboard, files), kbd + Keyboard (on-screen keyboard),
-            account (selected account and address → keys), screens/*
+            account (selected account and address → keys), app (which app and features),
+            boot (start an app), screens/*
+src/apps/   full, addresses, inspector, tools: each app's name, menu and screens
 scripts/    build.mjs, node-hooks.mjs (test import mapping), vendor.sh
 vendor/     pinned third-party sources (VENDORED.md)
 test/       node:test tests, psbt-fixture (sample PSBT builder), fixtures in data/

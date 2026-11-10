@@ -127,7 +127,7 @@ h1.h28 { font-size: 28px; }
 
 /* ---- segmented & tabs ---- */
 .seg { display: grid; gap: 4px; background: var(--surface); border: 1px solid var(--line); padding: 4px; }
-.seg button { height: 40px; border: none; background: transparent; color: var(--muted); font: 500 14px var(--sans); cursor: pointer; padding: 0 6px; }
+.seg button { height: 40px; border: none; background: transparent; color: var(--muted); font: 500 14px var(--sans); cursor: pointer; padding: 0 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .seg button.on { background: var(--primary); color: var(--on-primary); font-weight: 700; }
 .seg.h44 button { height: 44px; font-size: 15px; }
 .seg.h34 button { height: 34px; font-size: 12px; font-weight: 600; }
@@ -167,7 +167,8 @@ h1.h28 { font-size: 28px; }
 .valbox { flex: 1 1 auto; min-width: 0; min-height: 44px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); font: 400 13px/1.5 var(--mono); word-break: break-all; color: var(--text); white-space: pre-wrap; }
 .valbox.on-surface { background: var(--bg); }
 .valbox.hiddenv { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--dim); letter-spacing: 0.1em; }
-.valbox.hiddenv small { font: 400 12px var(--sans); letter-spacing: 0; color: var(--muted); }
+.valbox.hiddenv small { font: 400 12px var(--sans); letter-spacing: 0; color: var(--muted); white-space: nowrap; }
+.valbox.hiddenv > span { min-width: 0; overflow: hidden; white-space: nowrap; }
 .valbox.empty { color: var(--ph); }
 .valbox.tall { max-height: 220px; overflow-y: auto; }
 .iconbtn { width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line2); background: transparent; color: var(--accent); cursor: pointer; padding: 0; }
@@ -212,6 +213,25 @@ label.wordcell input { flex: 1 1 auto; min-width: 0; width: 100%; height: 32px; 
 .helpsec ul { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 1.5; }
 .helpsec b { font-weight: 600; }
 .chiprow { display: inline-flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+/* Tools home */
+.toolcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px; }
+.toolcard { display: flex; align-items: center; gap: 16px; padding: 18px; background: var(--surface); border: 1px solid var(--line); color: var(--text); text-decoration: none; }
+.toolcard:hover { border-color: var(--line2); }
+.toolcard .ic { width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line2); color: var(--accent); }
+.toolcard > span:last-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.toolcard b { font-size: 16px; font-weight: 600; }
+.toolcard small { font-size: 13px; color: var(--muted); }
+/* PSBT Inspector */
+.spread { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.steplist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); }
+.steplist li { display: flex; gap: 14px; padding: 14px 16px; }
+.steplist li + li { border-top: 1px solid var(--line); }
+.steplist .num { width: 28px; height: 28px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: 1px solid var(--accent); color: var(--accent); font-weight: 700; font-size: 14px; }
+.steplist li > span:last-child { display: flex; flex-direction: column; gap: 2px; }
+.steplist small { font-size: 13px; line-height: 1.45; color: var(--muted); }
+.sicard { display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--surface); border: 1px solid var(--line); }
+.sitag { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 1px 6px; border: 1px solid; flex-shrink: 0; }
+.cols2.tight { gap: 16px; }
 /* secp256k1 calculator */
 .gbtn { height: 30px; padding: 0 10px; border: 1px solid var(--primary); background: var(--primary); color: var(--on-primary); font: 600 12px var(--sans); cursor: pointer; }
 .gbtn.on { border-color: var(--line2); background: var(--line); color: var(--muted); }
@@ -349,6 +369,11 @@ label.wordcell input { flex: 1 1 auto; min-width: 0; width: 100%; height: 32px; 
 .wl-row + .wl-row { border-top: 1px solid var(--line); }
 .wl-row b { color: var(--text); font-weight: 700; }
 .wl-row .tail { color: var(--muted); }
+/* Phones: segment labels like "Uncompressed" and the word list's binary column fit at 320 px. */
+@media (max-width: 420px) {
+  .seg:not(.h34):has(> button:nth-child(3)) button { font-size: 12px; padding: 0 2px; line-height: 1.15; }
+  .wl-row { grid-template-columns: 36px 1fr auto; gap: 8px; padding: 8px 10px; font-size: 13px; }
+}
 .cand { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; max-height: 360px; overflow-y: auto; }
 .cand button { display: flex; align-items: center; justify-content: space-between; height: 44px; padding: 0 12px; border: 1px solid var(--line); background: var(--surface); color: var(--text); cursor: pointer; font: 400 14px var(--mono); }
 .cand button small { color: var(--muted); font-size: 12px; }

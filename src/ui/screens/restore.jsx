@@ -236,7 +236,7 @@ export function RestoreKey() {
       )}
       <div class="stack">
         <span class="caps s12">Accepted</span>
-        <div class="card">{A.map(([n, d]) => <div key={n} style={{ display: 'flex', alignItems: 'baseline', gap: '10px', padding: '8px 12px', borderTop: '1px solid var(--line)' }}><span class="mono" style={{ fontSize: '13px', minWidth: '110px' }}>{n}</span><span class="small">{d}</span></div>)}</div>
+        <div class="card">{A.map(([n, d]) => <div key={n} style={{ display: 'flex', alignItems: 'baseline', gap: '10px', padding: '8px 12px', borderTop: '1px solid var(--line)' }}><span class="mono" style={{ fontSize: '13px', minWidth: '96px' }}>{n}</span><span class="small" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{d}</span></div>)}</div>
       </div>
       {err && <span class="note err">{err}</span>}
       <Spacer />
