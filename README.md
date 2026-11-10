@@ -16,13 +16,13 @@ file, and a strict Content-Security-Policy with no network access.
 
 ## Pages
 
-| App                  | Open                                                                      | File                                                                                            | Has a wallet | Use it for                                                     |
-|----------------------|---------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|--------------|----------------------------------------------------------------|
-| **Full** (main page) | [Open Full](https://olegfomenko.github.io/offline-wallet/)                | [`offline-signer.html`](https://olegfomenko.github.io/offline-wallet/offline-signer.html)       | Yes          | Everything in one file: wallet, PSBT review and signing, tools |
-| **Addresses**        | [Open Addresses](https://olegfomenko.github.io/offline-wallet/addresses/) | [`offline-addresses.html`](https://olegfomenko.github.io/offline-wallet/offline-addresses.html) | Yes          | Keys and addresses; signing messages and raw hashes            |
-| **PSBT Inspector**   | [Open Inspector](https://olegfomenko.github.io/offline-wallet/inspector/) | [`psbt-inspector.html`](https://olegfomenko.github.io/offline-wallet/psbt-inspector.html)       | No           | Reviewing a PSBT and collecting signatures input by input      |
-| **Tools**            | [Open Tools](https://olegfomenko.github.io/offline-wallet/tools/)         | [`offline-tools.html`](https://olegfomenko.github.io/offline-wallet/offline-tools.html)         | No           | QR, hashes, secp256k1 math, BIP39 words                        |
-| Checksums            |                                                                           | [`SHA256SUMS`](https://olegfomenko.github.io/offline-wallet/SHA256SUMS)                         |              | Hashes of the four files                                       |
+| App                  | Open                                                                                  | File                                                                                            | Has a wallet | Use it for                                                     |
+|----------------------|---------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|--------------|----------------------------------------------------------------|
+| **Full** (main page) | [Open Full](https://olegfomenko.github.io/offline-wallet/)                            | [`offline-signer.html`](https://olegfomenko.github.io/offline-wallet/offline-signer.html)       | Yes          | Everything in one file: wallet, PSBT review and signing, tools |
+| **Addresses**        | [Open Addresses](https://olegfomenko.github.io/offline-wallet/offline-addresses.html) | [`offline-addresses.html`](https://olegfomenko.github.io/offline-wallet/offline-addresses.html) | Yes          | Keys and addresses; signing messages and raw hashes            |
+| **PSBT Inspector**   | [Open Inspector](https://olegfomenko.github.io/offline-wallet/psbt-inspector.html)    | [`psbt-inspector.html`](https://olegfomenko.github.io/offline-wallet/psbt-inspector.html)       | No           | Reviewing a PSBT and collecting signatures input by input      |
+| **Tools**            | [Open Tools](https://olegfomenko.github.io/offline-wallet/offline-tools.html)         | [`offline-tools.html`](https://olegfomenko.github.io/offline-wallet/offline-tools.html)         | No           | QR, hashes, secp256k1 math, BIP39 words                        |
+| Checksums            |                                                                                       | [`SHA256SUMS`](https://olegfomenko.github.io/offline-wallet/SHA256SUMS)                         |              | Hashes of the four files                                       |
 
 The pages are for trying the apps. For real keys, download the file, check its hash against
 `SHA256SUMS`, and open it on an offline computer (see Use).
@@ -205,9 +205,9 @@ byte-identical files, so you can rebuild and compare the hash with the published
 
 `.github/workflows/ci.yml` runs on every push and pull request: `npm ci`, `npm test`, `npm run build`,
 then a second build whose four files must match the first byte for byte. It prints the SHA-256s in
-the log. On `master` it publishes every app to GitHub Pages (see [Pages](#pages)), each at its
-short folder URL (`/addresses/`, `/inspector/`, `/tools/`; the Full app at `/` and `/full/`) and
-at its file name. All URLs of one app serve the same file, so its hash matches `SHA256SUMS`. Every
+the log. On `master` it publishes every app to GitHub Pages (see [Pages](#pages)) at its file
+name, and also at a short folder URL (`/addresses/`, `/inspector/`, `/tools/`; the Full app at `/`
+and `/full/`). All URLs of one app serve the same file, so its hash matches `SHA256SUMS`. Every
 action is pinned to a full commit hash.
 
 To turn Pages on once: in the repository's **Settings → Pages**, set **Source** to **GitHub Actions**.
